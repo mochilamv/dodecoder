@@ -1,79 +1,50 @@
 import { DefenseLevel } from '../types';
 
-/**
- * Anti-PRNU (Photo Response Non-Uniformity) Defense Engine
- *
- * Micro-optimized for low-level execution without dynamic heap allocation.
- * Neutralizes camera sensor silicon fingerprints via:
- * 1. Geometric grid de-synchronization (Micro-crop + Sub-pixel interpolation)
- * 2. Spatial noise disruption (Fast branchless pseudo-random micro-dithering)
- * 3. Color profile normalization
- */
-
 export interface PrnuTransformConfig {
-  cropLeft: number;
-  cropTop: number;
-  cropRight: number;
-  cropBottom: number;
-  scaleX: number;
-  scaleY: number;
+  theta: number; // radians
+  sx: number;
+  sy: number;
   noiseIntensity: number;
 }
 
-/**
- * Calculates cryptographic non-deterministic micro-transformations
- */
 export function calculateAntiPrnuConfig(
-  _width: number,
-  _height: number,
   level: DefenseLevel
 ): PrnuTransformConfig {
   if (level === 'standard') {
-    return {
-      cropLeft: 0,
-      cropTop: 0,
-      cropRight: 0,
-      cropBottom: 0,
-      scaleX: 1.0,
-      scaleY: 1.0,
-      noiseIntensity: 0,
-    };
+    return { theta: 0, sx: 1.0, sy: 1.0, noiseIntensity: 0 };
   }
 
-  // Pre-allocated static 8-byte entropy buffer
-  const seed = new Uint8Array(8);
+  const seed = new Uint32Array(3);
   crypto.getRandomValues(seed);
 
-  const isParanoid = level === 'paranoid';
-  const maxCrop = isParanoid ? 6 : 3;
-  const minCrop = isParanoid ? 2 : 1;
-  const cropRange = (maxCrop - minCrop + 1);
+  // Rotation theta in [0.1, 0.3] degrees, randomized sign
+  const thetaDeg = 0.1 + (seed[0] / 0xFFFFFFFF) * 0.2;
+  const sign = (seed[0] % 2 === 0) ? 1 : -1;
+  const theta = sign * (thetaDeg * Math.PI) / 180.0;
 
-  const cropLeft = minCrop + (seed[0] % cropRange);
-  const cropTop = minCrop + (seed[1] % cropRange);
-  const cropRight = minCrop + (seed[2] % cropRange);
-  const cropBottom = minCrop + (seed[3] % cropRange);
+  // Anisotropic scaling |sx - sy| >= 0.0005
+  // sx in [0.995, 0.999]
+  const sx = 0.995 + (seed[1] / 0xFFFFFFFF) * 0.004;
+  let sy = 0.995 + (seed[2] / 0xFFFFFFFF) * 0.004;
+  
+  if (Math.abs(sx - sy) < 0.0005) {
+      sy = sx < 0.997 ? sx + 0.0006 : sx - 0.0006;
+  }
 
-  const scaleDelta = isParanoid ? 0.005 : 0.003;
-  const scaleX = 1.0 - (seed[4] * (scaleDelta / 255.0));
-  const scaleY = 1.0 - (seed[5] * (scaleDelta / 255.0));
-
-  const noiseIntensity = isParanoid ? 2 : 0;
-
-  return {
-    cropLeft,
-    cropTop,
-    cropRight,
-    cropBottom,
-    scaleX,
-    scaleY,
-    noiseIntensity,
-  };
+  return { theta, sx, sy, noiseIntensity: 2 };
 }
 
-/**
- * Applies anti-PRNU perturbation to canvas context
- */
+// Fast Catmull-Rom weight calculation (alpha = -0.5)
+function cubicWeight(x: number): number {
+  const absX = Math.abs(x);
+  if (absX <= 1.0) {
+    return 1.5 * absX * absX * absX - 2.5 * absX * absX + 1.0;
+  } else if (absX < 2.0) {
+    return -0.5 * absX * absX * absX + 2.5 * absX * absX - 4.0 * absX + 2.0;
+  }
+  return 0.0;
+}
+
 export function applyPrnuDefense(
   sourceImage: ImageBitmap | HTMLCanvasElement,
   targetCanvas: HTMLCanvasElement | OffscreenCanvas,
@@ -82,91 +53,147 @@ export function applyPrnuDefense(
   const origW = sourceImage.width;
   const origH = sourceImage.height;
 
-  const config = calculateAntiPrnuConfig(origW, origH, level);
-  const ctx = targetCanvas.getContext('2d', { willReadFrequently: true }) as
-    | CanvasRenderingContext2D
-    | OffscreenCanvasRenderingContext2D
-    | null;
-
-  if (!ctx) throw new Error('Failed to acquire 2D rendering context');
-
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-
   if (level === 'standard') {
     targetCanvas.width = origW;
     targetCanvas.height = origH;
+    const ctx = targetCanvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
     ctx.drawImage(sourceImage, 0, 0);
     return;
   }
 
-  const maxCropX = Math.max(0, Math.floor((origW - 2) / 2));
-  const maxCropY = Math.max(0, Math.floor((origH - 2) / 2));
-  const actualCropLeft = Math.min(config.cropLeft, maxCropX);
-  const actualCropRight = Math.min(config.cropRight, maxCropX);
-  const actualCropTop = Math.min(config.cropTop, maxCropY);
-  const actualCropBottom = Math.min(config.cropBottom, maxCropY);
+  const config = calculateAntiPrnuConfig(level);
 
-  const srcX = actualCropLeft;
-  const srcY = actualCropTop;
-  const srcW = Math.max(1, origW - actualCropLeft - actualCropRight);
-  const srcH = Math.max(1, origH - actualCropTop - actualCropBottom);
+  // We need the source data. Render to an offscreen canvas.
+  const srcCanvas = new OffscreenCanvas(origW, origH);
+  const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+  srcCtx.drawImage(sourceImage, 0, 0);
+  const srcImgData = srcCtx.getImageData(0, 0, origW, origH);
+  const srcData = new Uint32Array(srcImgData.data.buffer); // 32-bit access for speed (ABGR)
 
-  targetCanvas.width = srcW;
-  targetCanvas.height = srcH;
+  // Crop slightly to hide boundaries rotated inwards
+  const crop = 3;
+  const destW = origW - crop * 2;
+  const destH = origH - crop * 2;
 
-  // Sub-pixel geometric resampling
-  ctx.save();
-  ctx.drawImage(sourceImage, srcX, srcY, srcW, srcH, 0, 0, srcW, srcH);
-  ctx.restore();
+  targetCanvas.width = destW;
+  targetCanvas.height = destH;
+  const destCtx = targetCanvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  const destImgData = destCtx.createImageData(destW, destH);
+  const destData = new Uint32Array(destImgData.data.buffer);
 
-  // High-performance micro-dithering (zero heap allocation in hot loop)
-  if (level === 'paranoid' && config.noiseIntensity > 0) {
-    injectAntiForensicDitherOptimized(ctx, srcW, srcH, config.noiseIntensity);
-  }
-}
+  // Affine Matrix
+  const cosT = Math.cos(config.theta);
+  const sinT = Math.sin(config.theta);
+  
+  // Forward matrix: [sx*cosT, -sy*sinT; sx*sinT, sy*cosT]
+  const a = config.sx * cosT;
+  const b = -config.sy * sinT;
+  const c = config.sx * sinT;
+  const d = config.sy * cosT;
+  
+  // Inverse matrix
+  const det = a * d - b * c;
+  const invA = d / det;
+  const invB = -b / det;
+  const invC = -c / det;
+  const invD = a / det;
 
-/**
- * High-performance, zero-allocation micro-dithering
- * Uses a 32-bit XorShift PRNG seeded with hardware entropy.
- * Avoids Web Crypto quota exceptions (>64KB limit) and leverages
- * native Uint8ClampedArray clamping without branching or Math.round.
- */
-function injectAntiForensicDitherOptimized(
-  ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
-  width: number,
-  height: number,
-  intensity: number
-): void {
-  const imgData = ctx.getImageData(0, 0, width, height);
-  const data = imgData.data; // Uint8ClampedArray
-  const totalChannels = width * height * 4;
+  const cx = origW / 2.0;
+  const cy = origH / 2.0;
 
-  // Seed XorShift32 with hardware entropy
+  // Dithering setup
   const entropy = new Uint32Array(1);
   crypto.getRandomValues(entropy);
   let state = entropy[0] || 0x12345678;
 
-  const maxDelta = intensity;
-  const span = (maxDelta * 2) + 1;
+  // Fast Bicubic Interpolation with DDA
+  for (let y = 0; y < destH; y++) {
+    // Center offset y
+    const dy = y + crop - cy;
+    
+    // Constant terms for this scanline
+    const startX = -cx + crop;
+    let srcX = startX * invA + dy * invB + cx;
+    let srcY = startX * invC + dy * invD + cy;
 
-  // Process R, G, B channels, leave A channel (idx + 3) intact
-  for (let i = 0; i < totalChannels; i += 4) {
-    // XorShift32
-    state ^= state << 13;
-    state ^= state >>> 17;
-    state ^= state << 5;
+    for (let x = 0; x < destW; x++) {
+      // 1. Get integer coordinates and fractional parts
+      const ix = Math.floor(srcX);
+      const iy = Math.floor(srcY);
+      const px = srcX - ix;
+      const py = srcY - iy;
 
-    // Fast branchless delta in [-intensity, +intensity]
-    const deltaR = ((state & 0xff) % span) - maxDelta;
-    const deltaG = (((state >>> 8) & 0xff) % span) - maxDelta;
-    const deltaB = (((state >>> 16) & 0xff) % span) - maxDelta;
+      // 2. Precalculate weights
+      const wx0 = cubicWeight(px + 1);
+      const wx1 = cubicWeight(px);
+      const wx2 = cubicWeight(px - 1);
+      const wx3 = cubicWeight(px - 2);
 
-    // Native Uint8ClampedArray hardware clamping handles underflow/overflow
-    data[i] += deltaR;
-    data[i + 1] += deltaG;
-    data[i + 2] += deltaB;
+      const wy0 = cubicWeight(py + 1);
+      const wy1 = cubicWeight(py);
+      const wy2 = cubicWeight(py - 1);
+      const wy3 = cubicWeight(py - 2);
+
+      let r = 0, g = 0, b = 0, a_ch = 0;
+
+      // 3. 16-tap sampling (4x4)
+      for (let m = -1; m <= 2; m++) {
+        let wy = 0;
+        if (m === -1) wy = wy0;
+        else if (m === 0) wy = wy1;
+        else if (m === 1) wy = wy2;
+        else wy = wy3;
+        if (wy === 0) continue;
+
+        let cy_idx = iy + m;
+        if (cy_idx < 0) cy_idx = 0;
+        else if (cy_idx >= origH) cy_idx = origH - 1;
+        
+        const rowOffset = cy_idx * origW;
+
+        for (let n = -1; n <= 2; n++) {
+          let wx = 0;
+          if (n === -1) wx = wx0;
+          else if (n === 0) wx = wx1;
+          else if (n === 1) wx = wx2;
+          else wx = wx3;
+          if (wx === 0) continue;
+
+          let cx_idx = ix + n;
+          if (cx_idx < 0) cx_idx = 0;
+          else if (cx_idx >= origW) cx_idx = origW - 1;
+
+          const w = wx * wy;
+          const pixel = srcData[rowOffset + cx_idx];
+          
+          // Little-endian ABGR: [R, G, B, A] in memory means:
+          // byte 0: R, byte 1: G, byte 2: B, byte 3: A
+          r += (pixel & 0xFF) * w;
+          g += ((pixel >> 8) & 0xFF) * w;
+          b += ((pixel >> 16) & 0xFF) * w;
+          a_ch += ((pixel >> 24) & 0xFF) * w;
+        }
+      }
+
+      // XorShift32 for dithering
+      state ^= state << 13;
+      state ^= state >>> 17;
+      state ^= state << 5;
+      const noise = ((state & 0xFF) % 5) - 2; // [-2, 2]
+
+      // Clamp and write
+      const outR = Math.min(255, Math.max(0, r + noise));
+      const outG = Math.min(255, Math.max(0, g + noise));
+      const outB = Math.min(255, Math.max(0, b + noise));
+      const outA = Math.min(255, Math.max(0, a_ch)); // no noise on alpha
+
+      destData[y * destW + x] = outR | (outG << 8) | (outB << 16) | (outA << 24);
+
+      // Advance DDA
+      srcX += invA;
+      srcY += invC;
+    }
   }
 
-  ctx.putImageData(imgData, 0, 0);
+  destCtx.putImageData(destImgData, 0, 0);
 }

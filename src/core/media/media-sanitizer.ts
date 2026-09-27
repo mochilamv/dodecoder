@@ -1,6 +1,6 @@
 import { DefenseLevel, SanitizedResult } from '../types';
 import { analyzeForensics } from '../forensic/exif-inspector';
-import { generateHashedName } from '../forensic/hash-naming';
+import { generateEphemeralSaltedName } from '../forensic/hash-naming';
 
 export interface MediaSanitizerOptions {
   defenseLevel: DefenseLevel;
@@ -11,10 +11,12 @@ const FOURCC_FTYP = 0x66747970;
 const FOURCC_MOOV = 0x6d6f6f76;
 const FOURCC_MVHD = 0x6d766864;
 const FOURCC_TKHD = 0x746b6864;
+const FOURCC_MDHD = 0x6d646864;
 const FOURCC_UDTA = 0x75647461;
 const FOURCC_META = 0x6d657461;
 const FOURCC_ILST = 0x696c7374;
 const FOURCC_UUID = 0x75756964;
+const FOURCC_MDAT = 0x6d646174;
 
 /**
  * Client-Side Video & Audio Anti-Forensic Sanitizer
@@ -47,7 +49,7 @@ export async function sanitizeMedia(
 
   const cleanBlob = new Blob([cleanBytes as any], { type: mimeType || 'video/mp4' });
   const ext = originalName.split('.').pop() || 'mp4';
-  const sanitizedName = await generateHashedName(cleanBytes, ext);
+  const sanitizedName = await generateEphemeralSaltedName(cleanBytes, ext);
   onProgress?.(90);
 
   const auditAfter = await analyzeForensics(cleanBlob, sanitizedName);
@@ -82,7 +84,6 @@ function isAudioFile(mimeType: string, name: string): boolean {
 
 /**
  * Zero-copy MP4 / MOV Container Sanitizer
- * Pre-allocates single continuous buffer and leverages Uint8Array.prototype.set (V8 memcpy).
  */
 function sanitizeMp4ContainerZeroCopy(input: Uint8Array): Uint8Array {
   const output = new Uint8Array(input.length);
@@ -107,7 +108,7 @@ function sanitizeMp4ContainerZeroCopy(input: Uint8Array): Uint8Array {
 
     if (actualSize < headerSize || readOffset + actualSize > len) break;
 
-    // Discard top-level user data or proprietary metadata boxes
+    // Discard top-level metadata boxes
     if (boxType === FOURCC_UDTA || boxType === FOURCC_META || boxType === FOURCC_UUID) {
       readOffset += actualSize;
       continue;
@@ -115,11 +116,16 @@ function sanitizeMp4ContainerZeroCopy(input: Uint8Array): Uint8Array {
 
     if (boxType === FOURCC_MOOV) {
       const moovSlice = input.subarray(readOffset, readOffset + actualSize);
-      const cleanedMoov = sanitizeMoovBoxZeroCopy(moovSlice);
+      const cleanedMoov = sanitizeBoxRecursive(moovSlice);
       output.set(cleanedMoov, writeOffset);
       writeOffset += cleanedMoov.length;
+    } else if (boxType === FOURCC_MDAT) {
+      const mdatSlice = input.subarray(readOffset, readOffset + actualSize);
+      const cleanedMdat = sanitizeMdat(mdatSlice);
+      output.set(cleanedMdat, writeOffset);
+      writeOffset += cleanedMdat.length;
     } else {
-      // Direct block copy of raw video/audio chunks (mdat, ftyp)
+      // Direct block copy
       output.set(input.subarray(readOffset, readOffset + actualSize), writeOffset);
       writeOffset += actualSize;
     }
@@ -131,18 +137,19 @@ function sanitizeMp4ContainerZeroCopy(input: Uint8Array): Uint8Array {
 }
 
 /**
- * Zero-copy deep sanitization of moov box
+ * Recursively parses and sanitizes boxes (like moov, trak, mdia).
  */
-function sanitizeMoovBoxZeroCopy(moovBytes: Uint8Array): Uint8Array {
-  const output = new Uint8Array(moovBytes.length);
-  let writeOffset = 8; // Reserve 8 bytes for moov header
+function sanitizeBoxRecursive(boxBytes: Uint8Array): Uint8Array {
+  const output = new Uint8Array(boxBytes.length);
+  let writeOffset = 8; // Box header
   let readOffset = 8;
-  const len = moovBytes.length;
-  const inView = new DataView(moovBytes.buffer, moovBytes.byteOffset, moovBytes.byteLength);
+  const len = boxBytes.length;
+  
+  const inView = new DataView(boxBytes.buffer, boxBytes.byteOffset, boxBytes.byteLength);
   const outView = new DataView(output.buffer, output.byteOffset, output.byteLength);
 
-  // Set 'moov' FourCC in placeholder
-  outView.setUint32(4, FOURCC_MOOV, false);
+  // Copy header
+  output.set(boxBytes.subarray(0, 8), 0);
 
   while (readOffset + 8 <= len) {
     const boxSize = inView.getUint32(readOffset, false);
@@ -160,44 +167,78 @@ function sanitizeMoovBoxZeroCopy(moovBytes: Uint8Array): Uint8Array {
 
     if (actualSize < headerSize || readOffset + actualSize > len) break;
 
-    // Discard nested metadata
+    // Discard metadata
     if (boxType === FOURCC_UDTA || boxType === FOURCC_META || boxType === FOURCC_ILST || boxType === FOURCC_UUID) {
       readOffset += actualSize;
       continue;
     }
 
-    const boxSub = moovBytes.subarray(readOffset, readOffset + actualSize);
-    output.set(boxSub, writeOffset);
+    // Is it a container box?
+    const isContainer = boxType === 0x7472616b /* trak */ || 
+                        boxType === 0x6d646961 /* mdia */ ||
+                        boxType === 0x6d696e66 /* minf */ ||
+                        boxType === 0x7374626c /* stbl */ ||
+                        boxType === 0x64696e66 /* dinf */;
 
-    // Normalize mvhd (Movie Header) timestamps
-    if (boxType === FOURCC_MVHD && actualSize >= 28) {
-      const version = output[writeOffset + 8];
-      if (version === 0) {
-        outView.setUint32(writeOffset + 12, 0, false);
-        outView.setUint32(writeOffset + 16, 0, false);
-      } else if (version === 1 && actualSize >= 40) {
-        outView.setBigUint64(writeOffset + 12, 0n, false);
-        outView.setBigUint64(writeOffset + 20, 0n, false);
+    if (isContainer) {
+      const childSlice = boxBytes.subarray(readOffset, readOffset + actualSize);
+      const cleanedChild = sanitizeBoxRecursive(childSlice);
+      output.set(cleanedChild, writeOffset);
+      writeOffset += cleanedChild.length;
+    } else {
+      // Leaf box
+      const boxSub = boxBytes.subarray(readOffset, readOffset + actualSize);
+      output.set(boxSub, writeOffset);
+
+      // Normalize mvhd, tkhd, mdhd timestamps
+      if ((boxType === FOURCC_MVHD || boxType === FOURCC_TKHD || boxType === FOURCC_MDHD) && actualSize >= 28) {
+        const version = output[writeOffset + 8];
+        if (version === 0) {
+          outView.setUint32(writeOffset + 12, 0, false);
+          outView.setUint32(writeOffset + 16, 0, false);
+        } else if (version === 1 && actualSize >= 40) {
+          outView.setBigUint64(writeOffset + 12, 0n, false);
+          outView.setBigUint64(writeOffset + 20, 0n, false);
+        }
       }
+      writeOffset += actualSize;
     }
 
-    // Normalize tkhd (Track Header) timestamps
-    if (boxType === FOURCC_TKHD && actualSize >= 28) {
-      const version = output[writeOffset + 8];
-      if (version === 0) {
-        outView.setUint32(writeOffset + 12, 0, false);
-        outView.setUint32(writeOffset + 16, 0, false);
-      }
-    }
-
-    writeOffset += actualSize;
     readOffset += actualSize;
   }
 
-  // Update total moov box size
+  // Update total box size
   outView.setUint32(0, writeOffset, false);
-
   return output.subarray(0, writeOffset);
+}
+
+/**
+ * Scans mdat for x264 SEI NAL units and overwrites them with zeros
+ * to remove encoder banners without altering container offsets.
+ */
+function sanitizeMdat(mdatBytes: Uint8Array): Uint8Array {
+  // We can't safely parse H264 NALs without stbl, but we can safely zero out 
+  // known text banners like 'x264 - core' inside the binary stream.
+  const banner = new TextEncoder().encode('x264 - core');
+  
+  for (let i = 8; i < mdatBytes.length - banner.length; i++) {
+    let match = true;
+    for (let j = 0; j < banner.length; j++) {
+      if (mdatBytes[i + j] !== banner[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      // Found the banner. Let's zero out a reasonable chunk around it
+      // typically an SEI message is a few hundred bytes at most.
+      // We will just zero out the next 256 bytes to destroy the string and config.
+      for (let k = 0; k < 256 && (i + k) < mdatBytes.length; k++) {
+        mdatBytes[i + k] = 0;
+      }
+    }
+  }
+  return mdatBytes;
 }
 
 /**

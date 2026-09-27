@@ -1,6 +1,6 @@
 import { DefenseLevel, OutputFormat, SanitizedResult } from '../types';
 import { analyzeForensics } from '../forensic/exif-inspector';
-import { generateHashedName } from '../forensic/hash-naming';
+import { generateEphemeralSaltedName } from '../forensic/hash-naming';
 import { applyPrnuDefense } from './prnu-defense';
 
 export interface ImageSanitizerOptions {
@@ -83,7 +83,7 @@ export async function sanitizeImage(
 
   // 8. Generate Anti-Forensic Hashed Filename (16 hex chars from SHA-256)
   const cleanBuffer = await cleanBlob.arrayBuffer();
-  const sanitizedName = await generateHashedName(cleanBuffer, ext);
+  const sanitizedName = await generateEphemeralSaltedName(cleanBuffer, ext);
 
   // 9. Post-Sanitization Forensic Audit (After)
   const auditAfter = await analyzeForensics(cleanBlob, sanitizedName);

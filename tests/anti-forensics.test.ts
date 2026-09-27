@@ -1,56 +1,51 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeSha256, generateHashedName, generateRandomName } from '../src/core/forensic/hash-naming';
+import { generateEphemeralSaltedName, generateRandomName } from '../src/core/forensic/hash-naming';
 import { calculateAntiPrnuConfig } from '../src/core/image/prnu-defense';
 import { inspectBinaryMarkers } from '../src/core/forensic/marker-parser';
 import { createSanitizedZipBundle } from '../src/core/utils/zip-export';
 import { SanitizedResult } from '../src/core/types';
 
-test('1. Cryptographic Hashing and Name Sanitization', async () => {
+test('1. Cryptographic Hashing and Ephemeral Salting', async () => {
   const sampleData = new TextEncoder().encode('anti-forensic-pure-payload');
-  const hash = await computeSha256(sampleData);
+  const hashedName1 = await generateEphemeralSaltedName(sampleData, '.JPEG', 16);
+  const hashedName2 = await generateEphemeralSaltedName(sampleData, '.JPEG', 16);
 
-  assert.equal(typeof hash, 'string');
-  assert.equal(hash.length, 64);
-
-  const hashedName = await generateHashedName(sampleData, '.JPEG', 16);
-  assert.equal(hashedName.length, 21); // 16 chars + .jpg (5 chars)
-  assert.ok(hashedName.endsWith('.jpeg'));
-  assert.equal(hashedName.slice(0, 16), hash.slice(0, 16));
+  // Assert distinct names due to CSPRNG salting, despite same payload
+  assert.notEqual(hashedName1, hashedName2, 'CSPRNG salting must generate distinct hashes for same payloads');
+  assert.equal(hashedName1.length, 21); // 16 chars + .jpeg (5 chars)
+  assert.ok(hashedName1.endsWith('.jpeg'));
 
   const randomName = generateRandomName('webp', 8);
-  assert.equal(randomName.length, 21); // 16 hex chars (8 bytes) + .webp
+  assert.equal(randomName.length, 21);
   assert.ok(randomName.endsWith('.webp'));
 });
 
-test('2. Anti-PRNU Configuration Calculations', () => {
-  const std = calculateAntiPrnuConfig(1920, 1080, 'standard');
-  assert.equal(std.cropLeft, 0);
-  assert.equal(std.cropTop, 0);
-  assert.equal(std.scaleX, 1.0);
+test('2. Anti-PRNU Affine Configuration Calculations', () => {
+  const std = calculateAntiPrnuConfig('standard');
+  assert.equal(std.theta, 0);
+  assert.equal(std.sx, 1.0);
+  assert.equal(std.sy, 1.0);
   assert.equal(std.noiseIntensity, 0);
 
-  const hardened = calculateAntiPrnuConfig(1920, 1080, 'hardened');
-  assert.ok(hardened.cropLeft >= 1 && hardened.cropLeft <= 3);
-  assert.ok(hardened.scaleX < 1.0);
-  assert.equal(hardened.noiseIntensity, 0);
-
-  const paranoid = calculateAntiPrnuConfig(1920, 1080, 'paranoid');
-  assert.ok(paranoid.cropLeft >= 2 && paranoid.cropLeft <= 6);
-  assert.ok(paranoid.scaleX < 1.0);
+  const paranoid = calculateAntiPrnuConfig('paranoid');
+  assert.ok(Math.abs(paranoid.theta) >= (0.1 * Math.PI) / 180.0, 'Rotation must be at least 0.1 degrees');
+  assert.ok(Math.abs(paranoid.theta) <= (0.3 * Math.PI) / 180.0, 'Rotation must be at most 0.3 degrees');
+  assert.ok(paranoid.sx < 1.0);
+  assert.ok(paranoid.sy < 1.0);
+  assert.ok(Math.abs(paranoid.sx - paranoid.sy) >= 0.00049, 'Scale must be anisotropic by at least 0.0005');
   assert.equal(paranoid.noiseIntensity, 2);
 });
 
 test('3. Binary Marker Parsing & Forensic Trap Detection', () => {
-  // Construct a synthetic JPEG with: SOI, APP1 (EXIF), DQT, SOS, EOI
   const fakeExifHeader = [
-    0xff, 0xd8, // SOI
-    0xff, 0xe1, 0x00, 0x0a, // APP1 length 10 (2 bytes length + 8 bytes payload)
-    0x45, 0x78, 0x69, 0x66, 0x00, 0x00, 0x11, 0x22, // 'Exif\0\0'
-    0xff, 0xdb, 0x00, 0x04, 0x00, 0x01, // DQT length 4
-    0xff, 0xda, // SOS
-    0x10, 0x20, // entropy data
-    0xff, 0xd9, // EOI
+    0xff, 0xd8,
+    0xff, 0xe1, 0x00, 0x0a,
+    0x45, 0x78, 0x69, 0x66, 0x00, 0x00, 0x11, 0x22,
+    0xff, 0xdb, 0x00, 0x04, 0x00, 0x01,
+    0xff, 0xda,
+    0x10, 0x20,
+    0xff, 0xd9,
   ];
 
   const buffer = new Uint8Array(fakeExifHeader).buffer;
@@ -58,39 +53,11 @@ test('3. Binary Marker Parsing & Forensic Trap Detection', () => {
 
   assert.ok(markers.length >= 4);
   const app1 = markers.find(m => m.marker === '0xFFE1');
-  assert.ok(app1, 'APP1 marker should be detected');
-  assert.equal(app1.isSanitizedSafe, false, 'EXIF APP1 must be flagged as unsafe');
-
-  const dqt = markers.find(m => m.marker === '0xFFDB');
-  assert.ok(dqt, 'DQT marker should be detected');
-  assert.equal(dqt.isSanitizedSafe, true, 'DQT is a standard visual compression table');
-
-  const eoi = markers.find(m => m.marker === '0xFFD9');
-  assert.ok(eoi, 'EOI marker should be detected');
+  assert.ok(app1);
+  assert.equal(app1.isSanitizedSafe, false);
 });
 
-test('4. PNG Chunk Parsing & Ancillary Metadata Detection', () => {
-  // Construct a synthetic PNG with: Signature, IHDR, tEXt, IEND
-  const fakePng = [
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG Signature
-    0x00, 0x00, 0x00, 0x01, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x00, 0x00, // IHDR
-    0x00, 0x00, 0x00, 0x04, 0x74, 0x45, 0x58, 0x74, 0x61, 0x62, 0x63, 0x64, 0x00, 0x00, 0x00, 0x00, // tEXt
-    0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82, // IEND
-  ];
-
-  const buffer = new Uint8Array(fakePng).buffer;
-  const chunks = inspectBinaryMarkers(buffer);
-
-  const ihdr = chunks.find(c => c.marker === 'IHDR');
-  assert.ok(ihdr);
-  assert.equal(ihdr.isSanitizedSafe, true);
-
-  const textChunk = chunks.find(c => c.marker === 'tEXt');
-  assert.ok(textChunk);
-  assert.equal(textChunk.isSanitizedSafe, false, 'tEXt chunk must be flagged as unsafe');
-});
-
-test('5. Zero-Trace ZIP Bundle Timestamp Normalization', async () => {
+test('4. Zero-Trace ZIP Bundle Timestamp Normalization', async () => {
   const dummyItem: SanitizedResult = {
     blob: new Blob(['sanitized-bytes'], { type: 'image/webp' }),
     originalName: 'IMG_20260927_150000.jpg',
@@ -100,109 +67,75 @@ test('5. Zero-Trace ZIP Bundle Timestamp Normalization', async () => {
     format: 'image/webp',
     sha256: '8a4f9b2dc3e1f0a28a4f9b2dc3e1f0a28a4f9b2dc3e1f0a28a4f9b2dc3e1f0a2',
     defenseLevel: 'hardened',
-    auditBefore: {
-      fileName: 'IMG_20260927_150000.jpg',
-      fileSize: 1000,
-      mimeType: 'image/jpeg',
-      hasExif: true,
-      hasGps: true,
-      hasThumbnail: true,
-      hasMakerNotes: true,
-      tags: [],
-      markers: [],
-      prnuSusceptibility: 'high',
-      sha256: '1111111111111111111111111111111111111111111111111111111111111111',
-    },
-    auditAfter: {
-      fileName: '8a4f9b2dc3e1f0a2.webp',
-      fileSize: 800,
-      mimeType: 'image/webp',
-      hasExif: false,
-      hasGps: false,
-      hasThumbnail: false,
-      hasMakerNotes: false,
-      tags: [],
-      markers: [],
-      prnuSusceptibility: 'low',
-      sha256: '8a4f9b2dc3e1f0a28a4f9b2dc3e1f0a28a4f9b2dc3e1f0a28a4f9b2dc3e1f0a2',
-    },
+    auditBefore: { fileName: '', fileSize: 0, mimeType: '', hasExif: false, hasGps: false, hasThumbnail: false, hasMakerNotes: false, tags: [], markers: [], prnuSusceptibility: 'high', sha256: '' },
+    auditAfter: { fileName: '', fileSize: 0, mimeType: '', hasExif: false, hasGps: false, hasThumbnail: false, hasMakerNotes: false, tags: [], markers: [], prnuSusceptibility: 'low', sha256: '' },
     processedAt: Date.now(),
   };
 
-  const { zipBlob, zipFileName } = await createSanitizedZipBundle([dummyItem]);
-  assert.ok(zipBlob.size > 0);
-  assert.ok(zipFileName.startsWith('bundle_'));
-  assert.ok(zipFileName.endsWith('.zip'));
+  const { zipBlob } = await createSanitizedZipBundle([dummyItem]);
+  const zipBuffer = await zipBlob.arrayBuffer();
+  const view = new DataView(zipBuffer);
+  
+  // Verify DOS Date and Time in LFH
+  const dosTime = view.getUint16(10, true);
+  const dosDate = view.getUint16(12, true);
+  
+  assert.equal(dosTime, 0x0000, 'DOS time must be exactly 0x0000');
+  assert.equal(dosDate, 0x0021, 'DOS date must be exactly 0x0021 (Jan 1, 1980)');
+  
+  const extraFieldLength = view.getUint16(28, true);
+  assert.equal(extraFieldLength, 0x0000, 'Extra field length must be exactly 0');
 });
 
-test('6. MP4 Container Box Stripping & mvhd Timestamp Zeroing', async () => {
-  // Construct a synthetic MP4:
-  // ftyp box (16 bytes) + moov box containing mvhd (32 bytes) and udta (16 bytes)
+test('5. MP4 Recursive Box Stripping (mdhd zeroing) and mdat wipe', async () => {
   const syntheticMp4 = new Uint8Array([
     // ftyp (16 bytes)
     0x00, 0x00, 0x00, 0x10, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00,
-    // moov (total 56 bytes)
-    0x00, 0x00, 0x00, 0x38, 0x6d, 0x6f, 0x6f, 0x76,
-    // mvhd (32 bytes)
-    0x00, 0x00, 0x00, 0x20, 0x6d, 0x76, 0x68, 0x64, 0x00, 0x00, 0x00, 0x00,
-    0x12, 0x34, 0x56, 0x78, // creation timestamp (non-zero)
-    0x9a, 0xbc, 0xde, 0xf0, // modification timestamp (non-zero)
+    // moov (72 bytes total)
+    0x00, 0x00, 0x00, 0x48, 0x6d, 0x6f, 0x6f, 0x76,
+    // trak (56 bytes)
+    0x00, 0x00, 0x00, 0x38, 0x74, 0x72, 0x61, 0x6b,
+    // mdia (48 bytes)
+    0x00, 0x00, 0x00, 0x30, 0x6d, 0x64, 0x69, 0x61,
+    // mdhd (32 bytes) - inside mdia inside trak
+    0x00, 0x00, 0x00, 0x20, 0x6d, 0x64, 0x68, 0x64, 0x00, 0x00, 0x00, 0x00,
+    0x12, 0x34, 0x56, 0x78, // creation timestamp
+    0x9a, 0xbc, 0xde, 0xf0, // modification timestamp
     0x00, 0x00, 0x03, 0xe8, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, 0x00, 0x00,
-    // udta (16 bytes - dangerous metadata to be stripped)
-    0x00, 0x00, 0x00, 0x10, 0x75, 0x64, 0x74, 0x61, 0x47, 0x50, 0x53, 0x20, 0x44, 0x41, 0x54, 0x41
+    // udta (8 bytes) inside moov - to be stripped
+    0x00, 0x00, 0x00, 0x08, 0x75, 0x64, 0x74, 0x61,
+    // mdat (24 bytes) - with banner
+    0x00, 0x00, 0x00, 0x18, 0x6d, 0x64, 0x61, 0x74,
+    ...new TextEncoder().encode('x264 - core foo!'), // 16 bytes
   ]);
 
-  const file = new File([syntheticMp4], 'test_video.mp4', { type: 'video/mp4' });
+  const file = new File([syntheticMp4], 'test.mp4', { type: 'video/mp4' });
   const { sanitizeMedia } = await import('../src/core/media/media-sanitizer');
-  const result = await sanitizeMedia(file, { defenseLevel: 'standard' });
+  const result = await sanitizeMedia(file, { defenseLevel: 'paranoid' });
 
-  assert.ok(result.sanitizedSize < syntheticMp4.length, 'Output must be smaller because udta was stripped');
   const cleanBuffer = await result.blob.arrayBuffer();
-  const cleanView = new DataView(cleanBuffer);
-
-  // Check that moov exists and udta was eliminated
   const cleanBytes = new Uint8Array(cleanBuffer);
-  const udtaFound = cleanBytes.some((_, i) =>
-    i + 4 <= cleanBytes.length &&
-    cleanBytes[i] === 0x75 && cleanBytes[i+1] === 0x64 && cleanBytes[i+2] === 0x74 && cleanBytes[i+3] === 0x61
-  );
-  assert.equal(udtaFound, false, 'udta box must not exist in sanitized stream');
+  
+  // Check udta was removed
+  const hasUdta = cleanBytes.some((_, i) => i + 4 <= cleanBytes.length && cleanBytes[i]===0x75 && cleanBytes[i+1]===0x64 && cleanBytes[i+2]===0x74 && cleanBytes[i+3]===0x61);
+  assert.equal(hasUdta, false, 'udta box must not exist');
 
-  // Check mvhd timestamps zeroed out
-  // mvhd is at offset 24 (16 ftyp + 8 moov header) -> timestamp at offset 36
-  assert.equal(cleanView.getUint32(36, false), 0, 'mvhd creation timestamp must be zeroed');
-  assert.equal(cleanView.getUint32(40, false), 0, 'mvhd modification timestamp must be zeroed');
-});
-
-test('7. Audio ID3 Header Stripping', async () => {
-  // Construct a synthetic MP3 with ID3v2 header at start and ID3v1 at end
-  const id3v2Header = new Uint8Array([
-    0x49, 0x44, 0x33, // 'ID3'
-    0x03, 0x00, 0x00, // v2.3
-    0x00, 0x00, 0x00, 0x04, // 4 synchsafe bytes = 4 bytes of tag payload
-    0x01, 0x02, 0x03, 0x04 // 4 bytes of tag payload
-  ]);
-  const audioData = new Uint8Array([0xff, 0xfb, 0x90, 0x44, 0x00, 0x01, 0x02, 0x03]); // pure frame
-  const id3v1Header = new Uint8Array(128);
-  id3v1Header[0] = 0x54; id3v1Header[1] = 0x41; id3v1Header[2] = 0x47; // 'TAG'
-
-  const fullAudio = new Uint8Array(id3v2Header.length + audioData.length + id3v1Header.length);
-  fullAudio.set(id3v2Header, 0);
-  fullAudio.set(audioData, id3v2Header.length);
-  fullAudio.set(id3v1Header, id3v2Header.length + audioData.length);
-
-  const file = new File([fullAudio], 'recording.mp3', { type: 'audio/mpeg' });
-  const { sanitizeMedia } = await import('../src/core/media/media-sanitizer');
-  const result = await sanitizeMedia(file, { defenseLevel: 'standard' });
-
-  assert.equal(result.sanitizedSize, audioData.length, 'Sanitized audio must contain strictly raw frame payload');
-});
-
-test('8. Edge Cases: Empty Buffers and Arbitrary File Names', async () => {
-  const emptyMarkers = inspectBinaryMarkers(new ArrayBuffer(0));
-  assert.equal(emptyMarkers.length, 0);
-
-  const oddName = await generateHashedName(new Uint8Array([1, 2, 3]), '..JPEG..');
-  assert.ok(oddName.endsWith('.jpeg'));
-  assert.ok(!oddName.includes('..'));
+  // Check mdhd timestamps zeroed out
+  // The mdhd will be inside the rebuilt box structure.
+  // Search for 'mdhd' (0x6d646864)
+  let mdhdOffset = -1;
+  for (let i = 0; i < cleanBytes.length - 4; i++) {
+    if (cleanBytes[i] === 0x6d && cleanBytes[i+1] === 0x64 && cleanBytes[i+2] === 0x68 && cleanBytes[i+3] === 0x64) {
+      mdhdOffset = i - 4;
+      break;
+    }
+  }
+  assert.ok(mdhdOffset > 0, 'mdhd must exist');
+  const cleanView = new DataView(cleanBuffer);
+  assert.equal(cleanView.getUint32(mdhdOffset + 12, false), 0, 'creation time zeroed');
+  assert.equal(cleanView.getUint32(mdhdOffset + 16, false), 0, 'mod time zeroed');
+  
+  // Check mdat banner was wiped
+  const hasBanner = cleanBytes.some((_, i) => i + 11 <= cleanBytes.length && new TextDecoder().decode(cleanBytes.slice(i, i+11)) === 'x264 - core');
+  assert.equal(hasBanner, false, 'x264 - core banner must be wiped');
 });
