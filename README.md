@@ -41,6 +41,11 @@ Dodecoder does not perform in-place tag editing. Instead, it fully reconstructs 
   - Recursively traverses `moov` > `trak` > `mdia` container hierarchies to purge proprietary metadata (`udta`, `meta`, `uuid`, `ilst`).
   - Resets creation and modification timestamps in all header boxes (`mvhd`, `tkhd`, `mdhd`).
   - Scans `mdat` payloads to zero out embedded encoder banners (such as `x264 - core ...`) without mutating sample table offsets.
+- **Display Calibration & ICC Profile Decimation (Zero-Copy):**
+  - Neutralizes monitor-specific calibration curves and display fingerprints injected by browser canvas encoders (`toBlob` / `convertToBlob`).
+  - Systematically parses bitstreams to excise `iCCP` (ICC Profile), `cHRM` (Primary Chromaticities), and `gAMA` chunks from PNG streams.
+  - Strips `APP2` (`ICC_PROFILE`) and vendor metadata markers from JPEG containers.
+  - Expunges `ICCP` chunks and clears ICC/metadata header flags in WebP (`VP8X`), preventing display hardware attribution.
 - **Audio ID3 Stripping:**
   - Extracts pure audio payload frames from MP3/WAV/OGG files, discarding ID3v1 and ID3v2 tags.
 
@@ -50,7 +55,7 @@ Dodecoder does not perform in-place tag editing. Instead, it fully reconstructs 
 
 Format detection is automated upon file ingestion:
 
-- **Images (JPEG, PNG, WebP, BMP, TIFF):** Canvas bitmap decimation, anti-PRNU affine transformations, metadata purge, and user-adjustable encoder compression.
+- **Images (JPEG, PNG, WebP, BMP, TIFF):** Canvas bitmap decimation, anti-PRNU affine transformations, ICC/display calibration purge, and user-adjustable encoder compression.
 - **Video (MP4, MOV):** Container-level recursive box sanitization, timestamp zeroing, and NAL SEI banner wiping.
 - **Audio (MP3, WAV, OGG):** Automatic removal of ID3v1 and ID3v2 metadata frames.
 - **Batch Processing:** Concurrently process multiple media files with single-click zero-trace ZIP export.
@@ -87,7 +92,7 @@ cd dodecoder
 # Install dependencies (development tools only)
 npm install
 
-# Run the automated forensic test suite
+# Run the automated forensic test suite (6 tests covering PRNU, salting, markers, ZIP, ISOBMFF, and ICC)
 npm test
 
 # Start local dev server

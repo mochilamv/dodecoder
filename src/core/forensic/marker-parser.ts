@@ -11,6 +11,10 @@ const FOURCC_ZTXT = 0x7a545874;
 const FOURCC_ITXT = 0x69545874;
 const FOURCC_TIME = 0x74494d45;
 const FOURCC_PHYS = 0x70485973;
+const FOURCC_PNG_ICCP = 0x69434350;
+const FOURCC_PNG_CHRM = 0x6348524d;
+const FOURCC_PNG_GAMA = 0x67414d41;
+const FOURCC_PNG_SRGB = 0x73524742;
 
 const FOURCC_VP8_ = 0x56503820;
 const FOURCC_VP8L = 0x5650384c;
@@ -277,6 +281,26 @@ function inspectPngChunks(_bytes: Uint8Array, view: DataView): MarkerInfo[] {
         isSafe = false;
         chunkName = 'pHYs';
         description = 'Physical pixel dimensions / DPI';
+        break;
+      case FOURCC_PNG_ICCP:
+        isSafe = false;
+        chunkName = 'iCCP';
+        description = 'Embedded ICC Color Profile / Display calibration fingerprint';
+        break;
+      case FOURCC_PNG_CHRM:
+        isSafe = false;
+        chunkName = 'cHRM';
+        description = 'Primary chromaticities display calibration';
+        break;
+      case FOURCC_PNG_GAMA:
+        isSafe = false;
+        chunkName = 'gAMA';
+        description = 'Image gamma correction curve';
+        break;
+      case FOURCC_PNG_SRGB:
+        isSafe = true;
+        chunkName = 'sRGB';
+        description = 'Standard sRGB color space rendering intent';
         break;
       default:
         chunkName = 'CHUNK';

@@ -2,6 +2,7 @@ import { DefenseLevel, OutputFormat, SanitizedResult } from '../types';
 import { analyzeForensics } from '../forensic/exif-inspector';
 import { generateEphemeralSaltedName } from '../forensic/hash-naming';
 import { applyPrnuDefense } from './prnu-defense';
+import { stripDisplayColorProfiles } from './icc-sanitizer';
 
 export interface ImageSanitizerOptions {
   defenseLevel: DefenseLevel;
@@ -60,12 +61,12 @@ export async function sanitizeImage(
   const quality = options.quality ?? 0.92;
   const ext = targetMime === 'image/webp' ? 'webp' : targetMime === 'image/png' ? 'png' : 'jpg';
 
-  // 6. Re-encode to clean blob
-  let cleanBlob: Blob;
+  // 6. Re-encode to blob via canvas
+  let rawBlob: Blob;
   if (canvas instanceof OffscreenCanvas) {
-    cleanBlob = await canvas.convertToBlob({ type: targetMime, quality });
+    rawBlob = await canvas.convertToBlob({ type: targetMime, quality });
   } else {
-    cleanBlob = await new Promise<Blob>((resolve, reject) => {
+    rawBlob = await new Promise<Blob>((resolve, reject) => {
       (canvas as HTMLCanvasElement).toBlob(
         b => {
           if (b) resolve(b);
@@ -76,16 +77,21 @@ export async function sanitizeImage(
       );
     });
   }
-  onProgress?.(85);
+  onProgress?.(80);
 
   // 7. Cleanup raw bitmap from memory
   bitmap.close();
 
-  // 8. Generate Anti-Forensic Hashed Filename (16 hex chars from SHA-256)
-  const cleanBuffer = await cleanBlob.arrayBuffer();
-  const sanitizedName = await generateEphemeralSaltedName(cleanBuffer, ext);
+  // 8. Zero-Copy Post-Processing: Strip browser-injected ICC display profiles and calibration chunks
+  const rawBuffer = await rawBlob.arrayBuffer();
+  const strippedBytes = stripDisplayColorProfiles(new Uint8Array(rawBuffer), targetMime);
+  const cleanBlob = new Blob([strippedBytes as any], { type: targetMime });
+  onProgress?.(88);
 
-  // 9. Post-Sanitization Forensic Audit (After)
+  // 9. Generate Anti-Forensic Hashed Filename (with CSPRNG Ephemeral Salting)
+  const sanitizedName = await generateEphemeralSaltedName(strippedBytes, ext);
+
+  // 10. Post-Sanitization Forensic Audit (After)
   const auditAfter = await analyzeForensics(cleanBlob, sanitizedName);
   onProgress?.(100);
 
