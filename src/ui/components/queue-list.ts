@@ -114,6 +114,24 @@ export function renderQueueList(
               <span class="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-950/20 text-emerald-400 font-mono">
                 CLEAN
               </span>
+              ${
+                item.result.warningBadge
+                  ? `
+                <span class="text-[10px] px-1.5 py-0.5 rounded border border-amber-500/50 bg-amber-950/40 text-amber-400 font-mono" title="${item.result.warningBadge}">
+                  ${item.result.warningBadge}
+                </span>
+              `
+                  : ''
+              }
+              ${
+                item.result.isBypass
+                  ? `
+                <span class="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 bg-neutral-900 text-neutral-300 font-mono" title="Sem metadados originais: bitstream 1:1 preservado">
+                  STRIP ONLY (1:1)
+                </span>
+              `
+                  : ''
+              }
             </div>
           `
               : ''

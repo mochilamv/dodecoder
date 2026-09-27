@@ -246,3 +246,9 @@ function stripWebpColorProfiles(input: Uint8Array): Uint8Array {
 
   return output.subarray(0, writePos);
 }
+
+/**
+ * Surgical metadata stripper for original bitstreams (Bypass and Bloat Fallback).
+ * Directly excises metadata segments/chunks from original bytes without re-encoding.
+ */
+export const stripAllMetadataSurgical = stripDisplayColorProfiles;

@@ -46,6 +46,17 @@ Dodecoder does not perform in-place tag editing. Instead, it fully reconstructs 
   - Systematically parses bitstreams to excise `iCCP` (ICC Profile), `cHRM` (Primary Chromaticities), and `gAMA` chunks from PNG streams.
   - Strips `APP2` (`ICC_PROFILE`) and vendor metadata markers from JPEG containers.
   - Expunges `ICCP` chunks and clears ICC/metadata header flags in WebP (`VP8X`), preventing display hardware attribution.
+- **Fast-Track Bypass ("Strip Only" 1:1 Bitstream):**
+  - Evaluates suspicious metadata tags via low-level DataView parsing prior to canvas decoding.
+  - Checks for APP1/Exif, APP1/XMP, APP2/ICC_PROFILE, and IFD1 (following the next-IFD pointer in TIFF headers) in JPEG, and `eXIf`, `iCCP`, `tEXt`, `zTXt`, `iTXt` in PNG.
+  - If suspicious tag count is 0, completely bypasses canvas rendering and noise dithering, returning the exact 1:1 bitstream with an ephemeral salted name.
+- **Intelligent Compression Routing (Lossy vs. Lossless):**
+  - Automatically identifies non-photographic images (screenshots, memes, text) via: (a) declared PNG MIME/extension; (b) `/screenshot/i` filename regex; (c) downscaled 48x48 color variance analysis (quantized unique colors < 32).
+  - Routes flat/non-photographic images to WebP Lossless without noise injection, eliminating artificial entropy injection in solid color areas.
+  - Restricts stochastic noise injection and Lossy 85% compression strictly to photographic JPEGs where physical PRNU silicon noise actually exists.
+- **Post-Processing Bloat Fallback:**
+  - If canvas re-encoding results in a clean blob larger than the original input file, the canvas output is discarded.
+  - Applies surgical binary stripping of metadata segments/chunks directly on the original bitstream, guaranteeing zero size inflation and flagging the UI with a `"Tamanho inflado por injeção de entropia"` alert.
 - **Audio ID3 Stripping:**
   - Extracts pure audio payload frames from MP3/WAV/OGG files, discarding ID3v1 and ID3v2 tags.
 
@@ -55,7 +66,7 @@ Dodecoder does not perform in-place tag editing. Instead, it fully reconstructs 
 
 Format detection is automated upon file ingestion:
 
-- **Images (JPEG, PNG, WebP, BMP, TIFF):** Canvas bitmap decimation, anti-PRNU affine transformations, ICC/display calibration purge, and user-adjustable encoder compression.
+- **Images (JPEG, PNG, WebP, BMP, TIFF):** Canvas bitmap decimation, intelligent lossy/lossless routing, PRNU affine transformations, ICC/display calibration purge, and user-adjustable encoder compression.
 - **Video (MP4, MOV):** Container-level recursive box sanitization, timestamp zeroing, and NAL SEI banner wiping.
 - **Audio (MP3, WAV, OGG):** Automatic removal of ID3v1 and ID3v2 metadata frames.
 - **Batch Processing:** Concurrently process multiple media files with single-click zero-trace ZIP export.
@@ -92,7 +103,7 @@ cd dodecoder
 # Install dependencies (development tools only)
 npm install
 
-# Run the automated forensic test suite (7 tests covering PRNU, salting, markers, ZIP, ISOBMFF, ICC, and WebP ALPH)
+# Run the automated forensic test suite (9 tests covering PRNU, salting, markers, ZIP, ISOBMFF, ICC, ALPH, bypass, and bloat fallback)
 npm test
 
 # Start local dev server

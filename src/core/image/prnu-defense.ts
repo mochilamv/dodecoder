@@ -8,7 +8,8 @@ export interface PrnuTransformConfig {
 }
 
 export function calculateAntiPrnuConfig(
-  level: DefenseLevel
+  level: DefenseLevel,
+  skipNoise: boolean = false
 ): PrnuTransformConfig {
   if (level === 'standard') {
     return { theta: 0, sx: 1.0, sy: 1.0, noiseIntensity: 0 };
@@ -31,7 +32,7 @@ export function calculateAntiPrnuConfig(
       sy = sx < 0.997 ? sx + 0.0006 : sx - 0.0006;
   }
 
-  return { theta, sx, sy, noiseIntensity: 2 };
+  return { theta, sx, sy, noiseIntensity: skipNoise ? 0 : 2 };
 }
 
 // Fast Catmull-Rom weight calculation (alpha = -0.5)
@@ -49,7 +50,8 @@ export function applyPrnuDefense(
   sourceImage: ImageBitmap | HTMLCanvasElement,
   targetCanvas: HTMLCanvasElement | OffscreenCanvas,
   level: DefenseLevel,
-  hasAlpha: boolean = true
+  hasAlpha: boolean = true,
+  skipNoise: boolean = false
 ): void {
   const origW = sourceImage.width;
   const origH = sourceImage.height;
@@ -62,7 +64,7 @@ export function applyPrnuDefense(
     return;
   }
 
-  const config = calculateAntiPrnuConfig(level);
+  const config = calculateAntiPrnuConfig(level, skipNoise);
 
   // We need the source data. Render to an offscreen canvas.
   const srcCanvas = new OffscreenCanvas(origW, origH);
@@ -176,11 +178,14 @@ export function applyPrnuDefense(
         }
       }
 
-      // XorShift32 for dithering
-      state ^= state << 13;
-      state ^= state >>> 17;
-      state ^= state << 5;
-      const noise = ((state & 0xFF) % 5) - 2; // [-2, 2]
+      // XorShift32 for dithering (omitted when noiseIntensity === 0 for flat media)
+      let noise = 0;
+      if (config.noiseIntensity > 0) {
+        state ^= state << 13;
+        state ^= state >>> 17;
+        state ^= state << 5;
+        noise = ((state & 0xFF) % 5) - 2; // [-2, 2]
+      }
 
       // Clamp and write
       const outR = Math.min(255, Math.max(0, r + noise));

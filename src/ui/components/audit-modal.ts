@@ -85,6 +85,27 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
           </div>
         </div>
 
+        ${
+          result.warningBadge
+            ? `
+          <div class="p-3 rounded-xl border border-amber-500/50 bg-amber-950/30 text-amber-300 text-xs font-mono flex items-center gap-2.5">
+            <span class="text-amber-400 shrink-0">${icons.alertTriangle}</span>
+            <span><strong>Aviso de Eficiência:</strong> ${result.warningBadge}. O resultado do canvas foi descartado e aplicada a remoção cirúrgica direta no bitstream para evitar inchaço.</span>
+          </div>
+        `
+            : ''
+        }
+        ${
+          result.isBypass
+            ? `
+          <div class="p-3 rounded-xl border border-neutral-700 bg-neutral-900/60 text-neutral-300 text-xs font-mono flex items-center gap-2.5">
+            <span class="text-emerald-400 shrink-0">${icons.check}</span>
+            <span><strong>Fast-Track Bypass (1:1):</strong> 0 metadados suspeitos encontrados. O bitstream foi preservado diretamente sem recodificação.</span>
+          </div>
+        `
+            : ''
+        }
+
         <!-- Metadata Tag Inspection -->
         <div class="border border-neutral-800 rounded-xl bg-neutral-950 p-4 space-y-3">
           <div class="flex items-center justify-between border-b border-neutral-800 pb-2">

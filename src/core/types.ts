@@ -50,6 +50,8 @@ export interface SanitizedResult {
   auditBefore: ForensicReport;
   auditAfter: ForensicReport;
   processedAt: number;
+  warningBadge?: string;
+  isBypass?: boolean;
 }
 
 export interface QueueItem {
