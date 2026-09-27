@@ -92,7 +92,7 @@ cd dodecoder
 # Install dependencies (development tools only)
 npm install
 
-# Run the automated forensic test suite (6 tests covering PRNU, salting, markers, ZIP, ISOBMFF, and ICC)
+# Run the automated forensic test suite (7 tests covering PRNU, salting, markers, ZIP, ISOBMFF, ICC, and WebP ALPH)
 npm test
 
 # Start local dev server

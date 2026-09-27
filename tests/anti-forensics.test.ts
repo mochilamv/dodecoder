@@ -227,3 +227,29 @@ test('6. Display Calibration and ICC Profile Stripping (iCCP, cHRM, gAMA, APP2, 
   // Check VP8X flag bit 5 was cleared
   assert.equal(cleanWebp[20] & 0x20, 0, 'VP8X ICC flag bit must be cleared');
 });
+
+test('7. WebP ALPH (Alpha transparency) chunk recognized as legitimate and safe', () => {
+  const syntheticWebpAlpha = new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, // RIFF
+    0x30, 0x00, 0x00, 0x00, // Size: 48
+    0x57, 0x45, 0x42, 0x50, // WEBP
+    // VP8X chunk (size 10, flag with Alpha bit 4 = 0x10 set)
+    0x56, 0x50, 0x38, 0x58,
+    0x0a, 0x00, 0x00, 0x00,
+    0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // ALPH chunk (size 4)
+    0x41, 0x4c, 0x50, 0x48,
+    0x04, 0x00, 0x00, 0x00,
+    0x00, 0x01, 0x02, 0x03,
+    // VP8 chunk (size 2)
+    0x56, 0x50, 0x38, 0x20,
+    0x02, 0x00, 0x00, 0x00,
+    0x11, 0x22
+  ]);
+
+  const markers = inspectBinaryMarkers(syntheticWebpAlpha.buffer);
+  const alphMarker = markers.find(m => m.marker === 'ALPH');
+  assert.ok(alphMarker, 'ALPH chunk must be detected');
+  assert.equal(alphMarker.isSanitizedSafe, true, 'ALPH chunk must be marked as sanitized safe');
+  assert.equal(alphMarker.name, 'WebP Chunk: ALPH');
+});

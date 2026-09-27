@@ -34,21 +34,7 @@ export async function sanitizeImage(
   const bitmap = await createImageBitmap(file);
   onProgress?.(50);
 
-  // 3. Setup Offscreen Canvas or Fallback Canvas
-  let canvas: HTMLCanvasElement | OffscreenCanvas;
-  if (typeof OffscreenCanvas !== 'undefined') {
-    canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-  } else {
-    canvas = document.createElement('canvas');
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-  }
-
-  // 4. Apply Anti-PRNU & Geometric Re-alignment
-  applyPrnuDefense(bitmap, canvas, options.defenseLevel);
-  onProgress?.(70);
-
-  // 5. Determine Target MIME type and extension
+  // 3. Determine Target MIME type and alpha requirement
   let targetMime: string = options.outputFormat;
   if (targetMime === 'original') {
     targetMime = file.type || 'image/jpeg';
@@ -58,8 +44,28 @@ export async function sanitizeImage(
     targetMime = 'image/webp';
   }
 
+  // Detect if source or target requires alpha channel (omit alpha for JPEG/opaque to avoid VP8X/ALPH chunks)
+  const isOpaqueSource = file.type === 'image/jpeg' || /\.(jpe?g|bmp)$/i.test(originalName);
+  const needsAlpha = !isOpaqueSource && targetMime !== 'image/jpeg';
+
   const quality = options.quality ?? 0.92;
   const ext = targetMime === 'image/webp' ? 'webp' : targetMime === 'image/png' ? 'png' : 'jpg';
+
+  // 4. Setup Offscreen Canvas or Fallback Canvas with explicit alpha channel setting
+  let canvas: HTMLCanvasElement | OffscreenCanvas;
+  if (typeof OffscreenCanvas !== 'undefined') {
+    canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+  } else {
+    canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+  }
+  // Initialize context with alpha flag to suppress unwanted VP8X and ALPH chunks
+  canvas.getContext('2d', { willReadFrequently: true, alpha: needsAlpha });
+
+  // 5. Apply Anti-PRNU & Geometric Re-alignment
+  applyPrnuDefense(bitmap, canvas, options.defenseLevel, needsAlpha);
+  onProgress?.(70);
 
   // 6. Re-encode to blob via canvas
   let rawBlob: Blob;

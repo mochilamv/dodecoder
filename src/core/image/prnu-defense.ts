@@ -48,7 +48,8 @@ function cubicWeight(x: number): number {
 export function applyPrnuDefense(
   sourceImage: ImageBitmap | HTMLCanvasElement,
   targetCanvas: HTMLCanvasElement | OffscreenCanvas,
-  level: DefenseLevel
+  level: DefenseLevel,
+  hasAlpha: boolean = true
 ): void {
   const origW = sourceImage.width;
   const origH = sourceImage.height;
@@ -56,7 +57,7 @@ export function applyPrnuDefense(
   if (level === 'standard') {
     targetCanvas.width = origW;
     targetCanvas.height = origH;
-    const ctx = targetCanvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+    const ctx = targetCanvas.getContext('2d', { willReadFrequently: true, alpha: hasAlpha }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
     ctx.drawImage(sourceImage, 0, 0);
     return;
   }
@@ -77,7 +78,7 @@ export function applyPrnuDefense(
 
   targetCanvas.width = destW;
   targetCanvas.height = destH;
-  const destCtx = targetCanvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+  const destCtx = targetCanvas.getContext('2d', { willReadFrequently: true, alpha: hasAlpha }) as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
   const destImgData = destCtx.createImageData(destW, destH);
   const destData = new Uint32Array(destImgData.data.buffer);
 
@@ -185,7 +186,7 @@ export function applyPrnuDefense(
       const outR = Math.min(255, Math.max(0, r + noise));
       const outG = Math.min(255, Math.max(0, g + noise));
       const outB = Math.min(255, Math.max(0, b + noise));
-      const outA = Math.min(255, Math.max(0, a_ch)); // no noise on alpha
+      const outA = hasAlpha ? Math.min(255, Math.max(0, a_ch)) : 255;
 
       destData[y * destW + x] = outR | (outG << 8) | (outB << 16) | (outA << 24);
 

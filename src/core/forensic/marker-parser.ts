@@ -24,6 +24,7 @@ const FOURCC_ANMF = 0x414e4d46;
 const FOURCC_WEBP_EXIF = 0x45584946;
 const FOURCC_WEBP_XMP  = 0x584d5020;
 const FOURCC_WEBP_ICCP = 0x49434350;
+const FOURCC_WEBP_ALPH = 0x414c5048;
 
 const FOURCC_UDTA = 0x75647461;
 const FOURCC_META = 0x6d657461;
@@ -373,6 +374,11 @@ function inspectWebPChunks(_bytes: Uint8Array, view: DataView): MarkerInfo[] {
         chunkName = 'ICCP';
         isSafe = false;
         description = 'ICC Color Profile';
+        break;
+      case FOURCC_WEBP_ALPH:
+        chunkName = 'ALPH';
+        isSafe = true;
+        description = 'Canal de transparência alfa dos pixels reconstruídos';
         break;
       default:
         chunkName = 'CHUNK';
