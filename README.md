@@ -2,9 +2,10 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![Security: Zero-Server](https://img.shields.io/badge/Security-Client--Side%20(Zero--Server)-10b981.svg)](#privacy--processing-guarantees)
+[![Dependencies: 0 Runtime](https://img.shields.io/badge/Dependencies-0%20Runtime-black.svg)](#sanitization-architecture)
 [![Platform: Static / GitHub Pages](https://img.shields.io/badge/Platform-Static%20%2F%20Pages-black.svg)](#development--deployment)
 
-A client-side static web application for **reconstructive media sanitization** (images, video, audio). Eliminates metadata, container fingerprints, and device sensor signatures directly in the browser with **zero backend, zero analytics, and zero outbound network traffic**.
+A client-side static web application for **reconstructive media sanitization** (images, video, audio). Eliminates metadata, container fingerprints, and device sensor signatures directly in browser memory with **zero backend, zero third-party runtime dependencies, zero analytics, and zero outbound network traffic**.
 
 Hosted on GitHub Pages: [mochilamv.github.io/dodecoder](https://mochilamv.github.io/dodecoder/)
 
@@ -12,24 +13,36 @@ Hosted on GitHub Pages: [mochilamv.github.io/dodecoder](https://mochilamv.github
 
 ## 1. Forensic Threat Model
 
-Common metadata strippers merely delete select tags while leaving underlying identifying characteristics intact. Media files can be tracked through multiple layers:
+Standard metadata strippers merely delete select tags while leaving underlying physical and algorithmic characteristics intact. Media files can be tracked through multiple forensic layers:
 
-1. **Metadata & Location:** EXIF, GPS coordinates, serial numbers, timestamps.
+1. **Metadata & Location:** EXIF, GPS coordinates, camera serial numbers, and device timestamps.
 2. **Embedded Thumbnails:** IFD1 previews often retain unedited image content or GPS data.
 3. **Proprietary MakerNotes:** Binary blocks storing camera settings, firmware versions, and sensor temperatures.
-4. **Sensor Noise (PRNU):** Microscopic imperfections in camera sensors leave a unique Photo Response Non-Uniformity pattern across images, enabling hardware identification.
-5. **Container & Quantization:** Distinct DQT/Huffman tables and container atoms expose the software and hardware pipeline used.
+4. **Sensor Silicon Noise (PRNU):** Microscopic imperfections in camera silicon sensors leave a unique Photo Response Non-Uniformity pattern across images, enabling hardware identification. Simple micro-cropping is ineffective as rigid translations fail against cross-correlation algorithms.
+5. **Container & Codec Signatures:** Distinct DQT/Huffman tables, encoder metadata banners (e.g. `x264 - core`), and container atoms (`udta`, `uuid`, `mdhd`) expose software pipelines and capture times.
+6. **Cross-Correlation & File System Leaks:** Deterministic content hashes enable correlation across seized devices, and standard ZIP utilities inject host OS timestamps (`0x5455`) and UID/GID permissions (`0x7875`).
 
 ---
 
 ## 2. Sanitization Architecture
 
-Dodecoder does not perform in-place tag editing. Instead, it fully reconstructs media in memory:
+Dodecoder does not perform in-place tag editing. Instead, it fully reconstructs and normalizes media bitstreams in memory with zero external runtime dependencies:
 
-- **Pure Pixel Decimation:** Decodes images to raw bitmap data via Canvas/Workers, discarding all original container headers, EXIF blocks, MakerNotes, and color profiles.
-- **Sensor Noise Disruption (Anti-PRNU):** Applies non-deterministic micro-crop, sub-pixel resampling, and flat-field micro-dithering to collapse physical sensor correlation.
-- **Normalized Re-Encoding:** Encodes into standard WebP, PNG, or JPEG bitstreams using standardized quantization matrices.
-- **Neutral Naming & Timestamps:** Generates names based on SHA-256 content hashes and sets archive timestamps to the standard epoch (1980).
+- **Mathematical PRNU Disruption (Affine + Bicubic):**
+  - Applies a non-deterministic Inverse Affine Transformation: random rotation ($\theta \in [0.1^\circ, 0.3^\circ]$) combined with anisotropic scaling ($|s_x - s_y| \ge 0.0005$) driven by hardware entropy (`crypto.getRandomValues`).
+  - Utilizes a high-performance Digital Differential Analyzer (DDA) loop with a 16-tap Catmull-Rom ($\alpha = -0.5$) bicubic interpolation kernel and XorShift32 micro-dithering, collapsing Peak-to-Correlation Energy (PCE) without visible quality degradation.
+- **CSPRNG Ephemeral Salting (Anti-Correlation):**
+  - Generates 256-bit cryptographically secure salts via `crypto.getRandomValues()` prepended to sanitized bitstreams before SHA-256 derivation.
+  - Salt and temporary combined buffers are explicitly overwritten with zeroes (`salt.fill(0)`) immediately after generation, neutralizing cross-device database correlation.
+- **Zero-Trace Standalone PKZIP Builder:**
+  - Employs an autonomous, zero-dependency binary serializer (`DataView`) enforcing MS-DOS/FAT attributes (`version made by = 0x0014`).
+  - Hardcodes DOS timestamps to standard epoch (`0x0021` / `0x0000` = Jan 1, 1980 00:00:00 UTC) and enforces `extra_field_length = 0`, permanently preventing UNIX timestamps and UID/GID leaks.
+- **Deep Recursive ISOBMFF / MP4 Sanitization:**
+  - Recursively traverses `moov` > `trak` > `mdia` container hierarchies to purge proprietary metadata (`udta`, `meta`, `uuid`, `ilst`).
+  - Resets creation and modification timestamps in all header boxes (`mvhd`, `tkhd`, `mdhd`).
+  - Scans `mdat` payloads to zero out embedded encoder banners (such as `x264 - core ...`) without mutating sample table offsets.
+- **Audio ID3 Stripping:**
+  - Extracts pure audio payload frames from MP3/WAV/OGG files, discarding ID3v1 and ID3v2 tags.
 
 ---
 
@@ -37,29 +50,29 @@ Dodecoder does not perform in-place tag editing. Instead, it fully reconstructs 
 
 Format detection is automated upon file ingestion:
 
-- **Images (JPEG, PNG, WebP, BMP, TIFF):** Full canvas bitmap decimation, anti-PRNU transformations, metadata purge, and user-adjustable encoder compression.
-- **Video (MP4, MOV):** Container-level sanitization stripping `udta`, `meta`, and `uuid` atoms, zeroing movie/track header creation timestamps.
+- **Images (JPEG, PNG, WebP, BMP, TIFF):** Canvas bitmap decimation, anti-PRNU affine transformations, metadata purge, and user-adjustable encoder compression.
+- **Video (MP4, MOV):** Container-level recursive box sanitization, timestamp zeroing, and NAL SEI banner wiping.
 - **Audio (MP3, WAV, OGG):** Automatic removal of ID3v1 and ID3v2 metadata frames.
-- **Batch Processing:** Process multiple files concurrently with single-click ZIP archive export.
+- **Batch Processing:** Concurrently process multiple media files with single-click zero-trace ZIP export.
 
 ---
 
 ## 4. Privacy & Processing Guarantees
 
-1. **Client-Side Execution:** All processing happens entirely in browser memory. No data is sent to external servers.
-2. **Ephemeral Memory:** Object URLs are explicitly revoked when files are inspected or cleared.
-3. **Monochromatic OLED Interface:** Minimalist True Black `#000000` design optimized for battery efficiency and high-contrast readability.
+1. **Zero Server / Zero Network:** All processing executes locally in browser memory. No data, telemetry, or device identifiers leave the client.
+2. **Ephemeral Memory Hygiene:** Object URLs are explicitly revoked, and sensitive hashing buffers are zero-filled in memory.
+3. **Monochromatic OLED Interface:** Minimalist True Black (`#000000`) HUD design optimized for focus, battery efficiency, and high contrast.
 
 ---
 
 ## 5. Inspection & Verification
 
-Dodecoder provides a file inspection tool to compare inputs against sanitized outputs:
+Dodecoder includes an integrated forensic inspection modal to audit files before and after sanitization:
 
 - Side-by-side media previews for images, video, and audio.
-- Extracted metadata tag table showing stripped attributes.
-- Container segment inspection confirming elimination of vendor markers.
-- Before-and-after cryptographic SHA-256 hashes.
+- Detailed tag table detailing purged metadata attributes.
+- Binary marker and container segment parser validating the elimination of vendor chunks.
+- Cryptographic SHA-256 validation.
 
 ---
 
@@ -71,10 +84,10 @@ Dodecoder provides a file inspection tool to compare inputs against sanitized ou
 git clone https://github.com/mochilamv/dodecoder.git
 cd dodecoder
 
-# Install dependencies
+# Install dependencies (development tools only)
 npm install
 
-# Run the automated test suite (8 tests covering image, video, audio, and hashing)
+# Run the automated forensic test suite
 npm test
 
 # Start local dev server
@@ -85,13 +98,12 @@ npm run dev
 ```bash
 npm run build
 ```
-The compiled, zero-dependency static assets will be in `./dist`.
+Compiled, zero-dependency static assets are output to `./dist`.
 
 ### Deploy to GitHub Pages
-1. Push this repository to GitHub: `git push -u origin main`
-2. Go to **Settings > Pages** on your GitHub repository.
-3. In **Build and deployment > Branch**, select **gh-pages** (or Source: **GitHub Actions**).
-4. The site is live at: `https://mochilamv.github.io/dodecoder/`
+1. Push to GitHub: `git push origin main`
+2. Configure **Settings > Environments > github-pages**: ensure `main` is authorized in deployment branch rules (or configure **Settings > Pages** to deploy via GitHub Actions).
+3. Live production: [https://mochilamv.github.io/dodecoder/](https://mochilamv.github.io/dodecoder/)
 
 ---
 

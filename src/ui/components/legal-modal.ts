@@ -62,11 +62,11 @@ export function renderLegalModal(onClose: () => void): HTMLElement {
           </div>
 
           <div class="space-y-2 border border-neutral-800 rounded-lg p-3 bg-black">
-            <div class="font-mono font-semibold text-white">Third-Party Dependencies</div>
+            <div class="font-mono font-semibold text-white">Dependencies & Architecture</div>
             <ul class="text-[11px] text-neutral-400 space-y-1 font-mono">
-              <li>• <strong>JSZip</strong> — MIT License</li>
-              <li>• <strong>Vite & TypeScript</strong> — MIT License</li>
-              <li>• <strong>Tailwind CSS</strong> — MIT License</li>
+              <li>• <strong>Runtime:</strong> Zero external third-party dependencies (100% Native Web APIs & Standalone TypeScript)</li>
+              <li>• <strong>Build Engine:</strong> Vite & TypeScript (MIT License)</li>
+              <li>• <strong>Styling:</strong> Tailwind CSS (MIT License)</li>
             </ul>
           </div>
         </section>
