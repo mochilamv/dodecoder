@@ -104,8 +104,8 @@ DoDecoder includes a side-by-side **Forensic Audit Room** that allows you to ins
 ### Local Development
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/site-dodecoder.git
-cd site-dodecoder
+git clone https://github.com/mochilamv/dodecoder.git
+cd dodecoder
 
 # Install dependencies
 npm install
