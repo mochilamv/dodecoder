@@ -39,6 +39,7 @@ export interface ForensicReport {
 
 export interface SanitizedResult {
   blob: Blob;
+  originalBlob?: Blob;
   originalName: string;
   sanitizedName: string;
   originalSize: number;

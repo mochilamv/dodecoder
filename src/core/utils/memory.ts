@@ -30,15 +30,3 @@ export function revokeUrls(urls: string[]): void {
     }
   }
 }
-
-/**
- * Zeroes out canvas dimensions to signal GPU/raster memory release
- */
-export function releaseCanvas(canvas: HTMLCanvasElement | OffscreenCanvas): void {
-  try {
-    canvas.width = 0;
-    canvas.height = 0;
-  } catch {
-    // Ignore
-  }
-}

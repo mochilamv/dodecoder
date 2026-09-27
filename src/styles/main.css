@@ -28,17 +28,3 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #404040;
 }
-
-/* Forensic scanning radar animation */
-@keyframes scanline {
-  0% {
-    transform: translateY(-100%);
-  }
-  100% {
-    transform: translateY(1000%);
-  }
-}
-
-.animate-scanline {
-  animation: scanline 3s linear infinite;
-}

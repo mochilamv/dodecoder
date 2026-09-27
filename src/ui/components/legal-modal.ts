@@ -37,19 +37,16 @@ export function renderLegalModal(onClose: () => void): HTMLElement {
           </p>
         </section>
 
-        <!-- 2. Cryptographic Air-Gap Guarantee -->
+        <!-- 2. Client-Side In-Memory Processing Guarantee -->
         <section class="space-y-2 p-3.5 rounded-xl border border-emerald-900/40 bg-emerald-950/10">
           <h3 class="text-xs font-mono font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
-            ${icons.lock} Technical Air-Gap Guarantee (Zero-Network)
+            ${icons.lock} Client-Side In-Memory Execution (Zero Server Traffic)
           </h3>
           <p class="text-neutral-300">
-            This application enforces an immutable browser-level <strong>Content Security Policy (CSP)</strong>:
+            100% of image decoding, decimation, Anti-PRNU transformations, and cryptographic hashing runs locally inside your browser's RAM via Canvas and Web Workers.
           </p>
-          <code class="block p-2 rounded bg-black border border-neutral-800 text-[11px] font-mono text-emerald-300 select-all">
-            connect-src 'none'; img-src 'self' blob: data:;
-          </code>
           <p class="text-[11px] text-neutral-400">
-            The browser engine mathematically rejects any attempt to establish network connections (HTTP requests, WebSockets, beacons, analytics). 100% of image rendering, decimation, and cryptographic hashing runs locally in your device's RAM.
+            No files, telemetry, analytics, or fingerprint data are ever transmitted to any external server. All processing is ephemeral and disappears when the tab is closed.
           </p>
         </section>
 

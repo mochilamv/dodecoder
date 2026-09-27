@@ -91,6 +91,7 @@ export async function sanitizeImage(
 
   return {
     blob: cleanBlob,
+    originalBlob: file,
     originalName,
     sanitizedName,
     originalSize: file.size,

@@ -1,4 +1,5 @@
 import { SanitizedResult } from '../../core/types';
+import { revokeUrls } from '../../core/utils/memory';
 import { icons } from '../icons';
 
 export function renderAuditModal(result: SanitizedResult, onClose: () => void): HTMLElement {
@@ -6,7 +7,7 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
   modal.className =
     'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md overflow-y-auto animate-fade-in';
 
-  const origPreview = URL.createObjectURL(result.auditBefore.fileName.match(/\.(mp4|mov|mp3|wav)$/i) ? result.blob : result.blob);
+  const origPreview = URL.createObjectURL(result.originalBlob || result.blob);
   const cleanPreview = URL.createObjectURL(result.blob);
 
   modal.innerHTML = `
@@ -42,7 +43,7 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
             </div>
 
             <div class="aspect-video bg-black rounded-lg border border-neutral-900 overflow-hidden flex items-center justify-center relative">
-              <img src="${cleanPreview}" alt="Original Preview" class="max-h-full max-w-full object-contain" />
+              ${renderMediaPreview(origPreview, result.originalName)}
               <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-red-500/40 text-[10px] font-mono text-red-400">
                 ${result.auditBefore.tags.length} Metadata Leaks Detected
               </div>
@@ -70,9 +71,9 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
             </div>
 
             <div class="aspect-video bg-black rounded-lg border border-neutral-900 overflow-hidden flex items-center justify-center relative">
-              <img src="${cleanPreview}" alt="Sanitized Preview" class="max-h-full max-w-full object-contain" />
+              ${renderMediaPreview(cleanPreview, result.sanitizedName)}
               <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-emerald-500/40 text-[10px] font-mono text-emerald-400 flex items-center gap-1">
-                ${icons.check} 0 Metadata Tags • Normalized DQT
+                ${icons.check} 0 Metadata Tags • Clean Bitstream
               </div>
             </div>
 
@@ -206,22 +207,34 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
     </div>
   `;
 
-  const closeBtn = modal.querySelector('#modal-close')!;
-  closeBtn.addEventListener('click', () => {
-    URL.revokeObjectURL(origPreview);
-    URL.revokeObjectURL(cleanPreview);
+  const closeHandler = () => {
+    revokeUrls([origPreview, cleanPreview]);
     onClose();
-  });
+  };
 
+  modal.querySelector('#modal-close')?.addEventListener('click', closeHandler);
   modal.addEventListener('click', e => {
-    if (e.target === modal) {
-      URL.revokeObjectURL(origPreview);
-      URL.revokeObjectURL(cleanPreview);
-      onClose();
-    }
+    if (e.target === modal) closeHandler();
   });
 
   return modal;
+}
+
+function renderMediaPreview(url: string, fileName: string): string {
+  const isVideo = /\.(mp4|mov|webm)$/i.test(fileName);
+  const isAudio = /\.(mp3|wav|ogg|aac|m4a)$/i.test(fileName);
+
+  if (isVideo) {
+    return `<video src="${url}" controls class="max-h-full max-w-full rounded"></video>`;
+  }
+  if (isAudio) {
+    return `
+      <div class="p-4 flex flex-col items-center justify-center text-center space-y-2 w-full">
+        <span class="text-neutral-400 font-mono text-[11px]">Audio Stream</span>
+        <audio src="${url}" controls class="w-full max-w-xs"></audio>
+      </div>`;
+  }
+  return `<img src="${url}" alt="Preview" class="max-h-full max-w-full object-contain" />`;
 }
 
 function formatBytes(bytes: number): string {

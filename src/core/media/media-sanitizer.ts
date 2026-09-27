@@ -55,6 +55,7 @@ export async function sanitizeMedia(
 
   return {
     blob: cleanBlob,
+    originalBlob: file,
     originalName,
     sanitizedName,
     originalSize: file.size,

@@ -1,7 +1,7 @@
 # DoDecoder — Client-Side Media Anti-Forensics & Anonymization Engine
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
-[![Security: Air-Gapped](https://img.shields.io/badge/Security-Air--Gapped%20(CSP%3A%20none)-10b981.svg)](#security-guarantees)
+[![Security: Zero-Server](https://img.shields.io/badge/Security-Client--Side%20(Zero--Server)-10b981.svg)](#security-guarantees)
 [![Platform: Static / GitHub Pages](https://img.shields.io/badge/Platform-Static%20WASM%20%2F%20Pages-black.svg)](#deployment)
 
 A high-performance, strictly client-side static web application designed for **deep destructive and reconstructive media sanitization** (images, video, audio). Built for high-threat environments, human rights defenders, investigative journalists, whistleblowers, and privacy-conscious users.
@@ -76,23 +76,24 @@ DoDecoder never edits files in place. It performs an in-memory **destructive dec
 
 ---
 
-## 4. Security & Air-Gap Guarantees
+## 4. Privacy & Processing Guarantees
 
-1. **Content Security Policy (CSP):**
-   ```html
-   <meta http-equiv="Content-Security-Policy" content="default-src 'self' blob: data:; connect-src 'none';">
-   ```
-   The `connect-src 'none'` directive mathematically forbids the browser from making any `fetch`, `XMLHttpRequest`, `WebSocket`, or beacon requests. Nothing leaves your browser.
-2. **Ephemeral RAM Processing:**
-   All files are processed strictly in device memory. Object URLs are immediately revoked via `URL.revokeObjectURL()`, and memory buffers can be purged at any time using the **Purge RAM** button.
-3. **True Black OLED UI:**
+1. **Client-Side In-Memory Execution:**
+   100% of image decimation, video box stripping, and cryptographic hashing runs locally in your device's memory. No files, telemetry, or analytics are ever transmitted to any external server.
+2. **Video & Audio Sanitization:**
+   - **MP4 / MOV:** Zero-copy container sanitization stripping `udta` (GPS, camera info), `meta`, and `uuid` atoms with 64-bit box support. Resets internal `mvhd` and `tkhd` creation/modification timestamps to 0 (Epoch 1904).
+   - **MP3 / Audio:** Strips both ID3v2 (variable-length tag headers) and ID3v1 (trailing 128-byte metadata tags).
+3. **Ephemeral RAM Management:**
+   Processed object URLs are explicitly revoked via `revokeUrls()`, and memory buffers can be zeroed at any time using the **Purge RAM** button.
+4. **True Black OLED UI:**
    Engineered with `#000000` True Black for minimum battery draw and optimal screen readability on mobile OLED displays (e.g. Motorola Moto G56, Google Pixel, Samsung Galaxy).
 
 ---
 
 ## 5. Built-in Forensic Audit Room
 
-DoDecoder includes a side-by-side **Forensic Audit Room** that allows you to inspect media before and after sanitization:
+DoDecoder includes a side-by-side **Forensic Audit Room** for verifying media before and after sanitization:
+- **Media Previews:** Live visual player comparisons for images, videos, and audio streams.
 - **Leak Extraction Table:** Lists all detected tags (GPS latitude/longitude, Camera Model, Serial Numbers, Software version, MakerNotes).
 - **Binary Segment Breakdown:** Verifies that dangerous container segments (`APP1`, `APP2`, `APP13`, `udta`, `meta`) have been completely replaced with only standard stream markers (`SOI`, `DQT`, `DHT`, `SOF`, `SOS`, `EOI`).
 - **Cryptographic Hash Verification:** Compares the source SHA-256 with the sanitized SHA-256.
@@ -110,7 +111,7 @@ cd dodecoder
 # Install dependencies
 npm install
 
-# Run automated tests
+# Run the automated test suite (8 tests covering image, video, audio, and hashing)
 npm test
 
 # Start local dev server
@@ -124,10 +125,10 @@ npm run build
 The compiled, zero-dependency static assets will be in `./dist`.
 
 ### Deploy to GitHub Pages
-1. Push this repository to GitHub.
-2. Go to **Settings > Pages**.
-3. Under **Build and deployment > Source**, select **GitHub Actions**.
-4. The workflow at `.github/workflows/deploy.yml` will automatically build and publish the site.
+1. Push this repository to GitHub: `git push -u origin main`
+2. Go to **Settings > Pages** on your GitHub repository.
+3. In **Build and deployment > Branch**, select **gh-pages** (or Source: **GitHub Actions**).
+4. The site is live at: `https://mochilamv.github.io/dodecoder/`
 
 ---
 

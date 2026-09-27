@@ -111,7 +111,7 @@ export function renderQueueList(
               <span class="text-[10px] text-neutral-500 font-mono">
                 (${formatBytes(item.result.sanitizedSize)})
               </span>
-              <span class="text-[10px] px-1.5 py-0.2 rounded border border-emerald-500/30 bg-emerald-950/20 text-emerald-400 font-mono">
+              <span class="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-950/20 text-emerald-400 font-mono">
                 CLEAN • NO ATTRIBUTION
               </span>
             </div>
