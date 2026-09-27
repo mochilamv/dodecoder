@@ -1,102 +1,65 @@
-# DoDecoder — Client-Side Media Anti-Forensics & Anonymization Engine
+# Dodecoder — Client-Side Media Sanitization & Anti-Forensics
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
-[![Security: Zero-Server](https://img.shields.io/badge/Security-Client--Side%20(Zero--Server)-10b981.svg)](#security-guarantees)
-[![Platform: Static / GitHub Pages](https://img.shields.io/badge/Platform-Static%20WASM%20%2F%20Pages-black.svg)](#deployment)
+[![Security: Zero-Server](https://img.shields.io/badge/Security-Client--Side%20(Zero--Server)-10b981.svg)](#privacy--processing-guarantees)
+[![Platform: Static / GitHub Pages](https://img.shields.io/badge/Platform-Static%20%2F%20Pages-black.svg)](#development--deployment)
 
-A high-performance, strictly client-side static web application designed for **deep destructive and reconstructive media sanitization** (images, video, audio). Built for high-threat environments, human rights defenders, investigative journalists, whistleblowers, and privacy-conscious users.
+A client-side static web application for **reconstructive media sanitization** (images, video, audio). Eliminates metadata, container fingerprints, and device sensor signatures directly in the browser with **zero backend, zero analytics, and zero outbound network traffic**.
 
-Hosted statically on GitHub Pages with **zero backend, zero analytics, and zero outbound network traffic**.
-
----
-
-## 1. The Forensic Threat Model
-
-Standard "EXIF removers" only modify metadata tags while leaving lethal forensic vectors intact. Forensic investigators, intelligence agencies, and automated big-data scrapers analyze digital media across five distinct forensic layers:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. Superficial Tags       (EXIF, GPS Coordinates, Timestamp)│
-├─────────────────────────────────────────────────────────────┤
-│ 2. Hidden Containers      (IFD1 Thumbnails, MakerNotes, XMP)│
-├─────────────────────────────────────────────────────────────┤
-│ 3. Compression Signatures (DQT Matrices, Huffman Tables)    │
-├─────────────────────────────────────────────────────────────┤
-│ 4. Sensor Fingerprint     (PRNU - Photo Response Noise)     │
-├─────────────────────────────────────────────────────────────┤
-│ 5. Local System Footprint (OS atime/mtime, Serial Filenames)│
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Why Attribute Stripping Fails:
-* **The IFD1 Thumbnail Trap:** Many tools strip the primary EXIF tags in IFD0, but leave the `IFD1` block untouched. IFD1 contains an unedited, embedded JPEG thumbnail of the original photograph—often exposing faces, locations, or wide-angle context that was cropped out of the main picture.
-* **Proprietary MakerNotes:** Camera and smartphone vendors (Apple, Samsung, Sony, Xiaomi, Motorola) embed proprietary encrypted or binary blobs containing sensor temperatures, battery status, lens serials, and face-recognition coordinates.
-* **Quantization Matrix Fingerprinting (DQT):** Forensic tools (such as JPEGsnoop and Amped Authenticate) inspect the 8x8 luminance and chrominance quantization tables (`0xFFDB`) to identify the exact camera model, hardware image processor (ISP), or editing software used.
-* **PRNU Sensor Ballistics:** Microscopic silicon imperfections in each camera's CMOS sensor leave an invisible, unique fixed pattern noise (*Photo Response Non-Uniformity*). Wavelet cross-correlation can match an image to a physical device just like ballistic rifling marks match a bullet to a firearm barrel.
+Hosted on GitHub Pages: [mochilamv.github.io/dodecoder](https://mochilamv.github.io/dodecoder/)
 
 ---
 
-## 2. The DoDecoder Defense Architecture
+## 1. Forensic Threat Model
 
-DoDecoder never edits files in place. It performs an in-memory **destructive decimation and pure pixel reconstruction**:
+Common metadata strippers merely delete select tags while leaving underlying identifying characteristics intact. Media files can be tracked through multiple layers:
 
-```
-[Raw Media Artifact]
-         │
-         ▼
-[In-Memory Decimation via OffscreenCanvas / Web Worker]
-  └─ Container and all APP1..APP15 metadata blocks discarded
-         │
-         ▼
-[Anti-PRNU & Geometric De-synchronization Engine]
-  ├─ Non-deterministic micro-crop (2 to 6 pixels)
-  ├─ Sub-pixel bicubic/bilinear resampling (collapses wavelet correlation)
-  ├─ Controlled high-frequency micro-dithering in flat fields
-  └─ Color space normalized to standard sRGB (ICC profile eliminated)
-         │
-         ▼
-[Clean Re-Encoding]
-  └─ Re-quantized with standard IJG / WebP quantization matrices
-         │
-         ▼
-[Forensic Naming & Filesystem Packaging]
-  ├─ Filename: SHA-256(cleaned_bytes)[0..15] + extension
-  └─ Batch ZIP Bundle: Normalizes all internal timestamps to MS-DOS Epoch (1980-01-01)
-```
+1. **Metadata & Location:** EXIF, GPS coordinates, serial numbers, timestamps.
+2. **Embedded Thumbnails:** IFD1 previews often retain unedited image content or GPS data.
+3. **Proprietary MakerNotes:** Binary blocks storing camera settings, firmware versions, and sensor temperatures.
+4. **Sensor Noise (PRNU):** Microscopic imperfections in camera sensors leave a unique Photo Response Non-Uniformity pattern across images, enabling hardware identification.
+5. **Container & Quantization:** Distinct DQT/Huffman tables and container atoms expose the software and hardware pipeline used.
 
 ---
 
-## 3. Defense Modes
+## 2. Sanitization Architecture
 
-| Defense Mode | Core Operations | Primary Defense Against |
-| :--- | :--- | :--- |
-| **Standard Cleanse** | 1:1 Pure bitmap decimation, complete metadata purge, DQT normalization. | EXIF, GPS, IFD1 thumbnails, MakerNotes, XMP history, camera software signatures. |
-| **Hardened (Recommended)** | Standard + non-deterministic micro-crop & sub-pixel resampling. | **PRNU sensor matching**, image matrix correlation, hardware attribution. |
-| **Paranoid Mode** | Hardened + pseudo-random micro-dithering in low-variance fields. | Advanced wavelet Wiener filter extraction and multi-image correlation. |
+Dodecoder does not perform in-place tag editing. Instead, it fully reconstructs media in memory:
+
+- **Pure Pixel Decimation:** Decodes images to raw bitmap data via Canvas/Workers, discarding all original container headers, EXIF blocks, MakerNotes, and color profiles.
+- **Sensor Noise Disruption (Anti-PRNU):** Applies non-deterministic micro-crop, sub-pixel resampling, and flat-field micro-dithering to collapse physical sensor correlation.
+- **Normalized Re-Encoding:** Encodes into standard WebP, PNG, or JPEG bitstreams using standardized quantization matrices.
+- **Neutral Naming & Timestamps:** Generates names based on SHA-256 content hashes and sets archive timestamps to the standard epoch (1980).
+
+---
+
+## 3. Supported Formats & Automation
+
+Format detection is automated upon file ingestion:
+
+- **Images (JPEG, PNG, WebP, BMP, TIFF):** Full canvas bitmap decimation, anti-PRNU transformations, metadata purge, and user-adjustable encoder compression.
+- **Video (MP4, MOV):** Container-level sanitization stripping `udta`, `meta`, and `uuid` atoms, zeroing movie/track header creation timestamps.
+- **Audio (MP3, WAV, OGG):** Automatic removal of ID3v1 and ID3v2 metadata frames.
+- **Batch Processing:** Process multiple files concurrently with single-click ZIP archive export.
 
 ---
 
 ## 4. Privacy & Processing Guarantees
 
-1. **Client-Side In-Memory Execution:**
-   100% of image decimation, video box stripping, and cryptographic hashing runs locally in your device's memory. No files, telemetry, or analytics are ever transmitted to any external server.
-2. **Video & Audio Sanitization:**
-   - **MP4 / MOV:** Zero-copy container sanitization stripping `udta` (GPS, camera info), `meta`, and `uuid` atoms with 64-bit box support. Resets internal `mvhd` and `tkhd` creation/modification timestamps to 0 (Epoch 1904).
-   - **MP3 / Audio:** Strips both ID3v2 (variable-length tag headers) and ID3v1 (trailing 128-byte metadata tags).
-3. **Ephemeral RAM Management:**
-   Processed object URLs are explicitly revoked via `revokeUrls()`, and memory buffers can be zeroed at any time using the **Purge RAM** button.
-4. **True Black OLED UI:**
-   Engineered with `#000000` True Black for minimum battery draw and optimal screen readability on mobile OLED displays (e.g. Motorola Moto G56, Google Pixel, Samsung Galaxy).
+1. **Client-Side Execution:** All processing happens entirely in browser memory. No data is sent to external servers.
+2. **Ephemeral Memory:** Object URLs are explicitly revoked when files are inspected or cleared.
+3. **Monochromatic OLED Interface:** Minimalist True Black `#000000` design optimized for battery efficiency and high-contrast readability.
 
 ---
 
-## 5. Built-in Forensic Audit Room
+## 5. Inspection & Verification
 
-DoDecoder includes a side-by-side **Forensic Audit Room** for verifying media before and after sanitization:
-- **Media Previews:** Live visual player comparisons for images, videos, and audio streams.
-- **Leak Extraction Table:** Lists all detected tags (GPS latitude/longitude, Camera Model, Serial Numbers, Software version, MakerNotes).
-- **Binary Segment Breakdown:** Verifies that dangerous container segments (`APP1`, `APP2`, `APP13`, `udta`, `meta`) have been completely replaced with only standard stream markers (`SOI`, `DQT`, `DHT`, `SOF`, `SOS`, `EOI`).
-- **Cryptographic Hash Verification:** Compares the source SHA-256 with the sanitized SHA-256.
+Dodecoder provides a file inspection tool to compare inputs against sanitized outputs:
+
+- Side-by-side media previews for images, video, and audio.
+- Extracted metadata tag table showing stripped attributes.
+- Container segment inspection confirming elimination of vendor markers.
+- Before-and-after cryptographic SHA-256 hashes.
 
 ---
 

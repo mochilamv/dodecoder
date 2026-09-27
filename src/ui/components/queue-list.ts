@@ -13,10 +13,10 @@ export function renderQueueList(
   callbacks: QueueListCallbacks
 ): HTMLElement {
   const container = document.createElement('div');
-  container.className = 'mt-8 space-y-4';
+  container.className = 'mt-6 space-y-4';
 
   if (items.length === 0) {
-    return container; // Empty container when no items
+    return container;
   }
 
   const completedCount = items.filter(i => i.status === 'done').length;
@@ -26,9 +26,9 @@ export function renderQueueList(
     <!-- Batch Actions Bar -->
     <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-[#080808] border border-neutral-800">
       <div class="flex items-center gap-2">
-        <span class="w-2.5 h-2.5 rounded-full ${completedCount === totalCount ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}"></span>
-        <span class="text-xs font-mono font-semibold text-neutral-200">
-          Queue: ${completedCount} / ${totalCount} Processed
+        <span class="w-2.5 h-2.5 rounded-full ${completedCount === totalCount ? 'bg-emerald-400' : 'bg-neutral-400 animate-pulse'}"></span>
+        <span class="text-xs font-mono font-medium text-neutral-300">
+          Queue: ${completedCount} of ${totalCount} processed
         </span>
       </div>
 
@@ -36,17 +36,17 @@ export function renderQueueList(
         ${
           completedCount > 0
             ? `
-          <button id="btn-download-zip" class="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black font-semibold text-xs font-mono transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.2)]">
+          <button id="btn-download-zip" class="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black font-semibold text-xs font-mono transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
             ${icons.archive}
-            <span>Download Zero-Trace ZIP</span>
+            <span>Download All (ZIP)</span>
           </button>
         `
             : ''
         }
 
-        <button id="btn-clear-all" class="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-red-900/60 text-neutral-400 hover:text-red-400 text-xs font-mono transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+        <button id="btn-clear-all" class="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-red-400 text-xs font-mono transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
           ${icons.trash}
-          <span>Purge RAM</span>
+          <span>Clear</span>
         </button>
       </div>
     </div>
@@ -71,7 +71,7 @@ export function renderQueueList(
   items.forEach(item => {
     const itemEl = document.createElement('div');
     itemEl.className =
-      'p-4 rounded-xl border border-neutral-900 bg-black/90 hover:border-neutral-800 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4';
+      'p-4 rounded-xl border border-neutral-900 bg-black hover:border-neutral-800 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4';
 
     const isDone = item.status === 'done';
     const isError = item.status === 'error';
@@ -80,24 +80,24 @@ export function renderQueueList(
     const threatBadges: string[] = [];
     if (item.result?.auditBefore) {
       const b = item.result.auditBefore;
-      if (b.hasGps) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-red-950/70 border border-red-500/40 text-red-300">GPS EXPOSED</span>`);
-      if (b.hasThumbnail) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-red-950/70 border border-red-500/40 text-red-300">IFD1 THUMBNAIL</span>`);
-      if (b.hasMakerNotes) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-950/70 border border-amber-500/40 text-amber-300">MAKERNOTES</span>`);
-      if (b.hasExif && !b.hasGps) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-neutral-900 border border-neutral-700 text-neutral-300">EXIF TAGS</span>`);
+      if (b.hasGps) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-red-950/80 border border-red-500/50 text-red-400">GPS EXPOSED</span>`);
+      if (b.hasThumbnail) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-red-950/80 border border-red-500/50 text-red-400">THUMBNAIL LEAK</span>`);
+      if (b.hasMakerNotes) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-red-950/80 border border-red-500/50 text-red-400">MAKERNOTES</span>`);
+      if (b.hasExif && !b.hasGps) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-neutral-900 border border-neutral-800 text-neutral-300">EXIF</span>`);
     }
 
     itemEl.innerHTML = `
       <div class="flex items-start gap-3 min-w-0 flex-1">
-        <div class="w-9 h-9 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center shrink-0 mt-0.5 text-neutral-400">
-          ${isDone ? `<span class="text-emerald-400">${icons.check}</span>` : isError ? `<span class="text-red-400">${icons.alertTriangle}</span>` : `<span class="text-neutral-500 animate-spin">${icons.cpu}</span>`}
+        <div class="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center shrink-0 mt-0.5 text-neutral-400">
+          ${isDone ? `<span class="text-emerald-400">${icons.check}</span>` : isError ? `<span class="text-red-400">${icons.alertTriangle}</span>` : `<span class="text-neutral-400 animate-spin">${icons.cpu}</span>`}
         </div>
 
         <div class="min-w-0 flex-1 space-y-1">
           <div class="flex flex-wrap items-center gap-2">
-            <span class="text-xs font-mono font-medium text-neutral-300 truncate max-w-[200px] sm:max-w-xs" title="${item.file.name}">
+            <span class="text-xs font-mono font-medium text-neutral-200 truncate max-w-[200px] sm:max-w-xs" title="${item.file.name}">
               ${item.file.name}
             </span>
-            <span class="text-[10px] text-neutral-500 font-mono">(${formatBytes(item.file.size)})</span>
+            <span class="text-[10px] text-neutral-400 font-mono">(${formatBytes(item.file.size)})</span>
             ${threatBadges.join(' ')}
           </div>
 
@@ -105,14 +105,14 @@ export function renderQueueList(
             isDone && item.result
               ? `
             <div class="flex flex-wrap items-center gap-2 pt-0.5">
-              <span class="text-xs font-mono text-emerald-400 font-semibold flex items-center gap-1">
-                ${icons.sparkles} ${item.result.sanitizedName}
+              <span class="text-xs font-mono text-emerald-400 font-medium">
+                ${item.result.sanitizedName}
               </span>
-              <span class="text-[10px] text-neutral-500 font-mono">
+              <span class="text-[10px] text-neutral-400 font-mono">
                 (${formatBytes(item.result.sanitizedSize)})
               </span>
               <span class="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-950/20 text-emerald-400 font-mono">
-                CLEAN • NO ATTRIBUTION
+                CLEAN
               </span>
             </div>
           `
@@ -123,10 +123,10 @@ export function renderQueueList(
             isProcessing
               ? `
             <div class="w-full bg-neutral-900 h-1.5 rounded-full overflow-hidden mt-2">
-              <div class="bg-emerald-400 h-full transition-all duration-300" style="width: ${item.progress}%"></div>
+              <div class="bg-neutral-200 h-full transition-all duration-300" style="width: ${item.progress}%"></div>
             </div>
-            <div class="text-[10px] text-neutral-500 font-mono flex justify-between">
-              <span>${item.status === 'analyzing' ? 'Forensic deep scan...' : 'Decimating & Re-encoding...'}</span>
+            <div class="text-[10px] text-neutral-400 font-mono flex justify-between">
+              <span>${item.status === 'analyzing' ? 'Scanning...' : 'Re-encoding...'}</span>
               <span>${item.progress}%</span>
             </div>
           `
@@ -137,7 +137,7 @@ export function renderQueueList(
             isError
               ? `
             <div class="text-xs text-red-400 font-mono mt-1">
-              Error: ${item.error || 'Failed to process file'}
+              Error: ${item.error || 'Failed to process'}
             </div>
           `
               : ''
@@ -165,7 +165,6 @@ export function renderQueueList(
       }
     `;
 
-    // Hook buttons
     const inspectBtn = itemEl.querySelector('.btn-inspect');
     if (inspectBtn) {
       inspectBtn.addEventListener('click', () => callbacks.onInspectForensics(item));

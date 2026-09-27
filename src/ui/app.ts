@@ -1,8 +1,7 @@
-import { DefenseLevel, OutputFormat, QueueItem, SanitizedResult } from '../core/types';
+import { QueueItem, SanitizedResult } from '../core/types';
 import { processMediaFile } from '../core/pipeline';
 import { createSanitizedZipBundle, triggerEphemeralDownload } from '../core/utils/zip-export';
 import { wipeBuffer } from '../core/utils/memory';
-import { renderHeader } from './components/header';
 import { renderSettingsPanel, SettingsState } from './components/settings-panel';
 import { renderDropzone } from './components/dropzone';
 import { renderQueueList } from './components/queue-list';
@@ -12,9 +11,7 @@ import { renderLegalModal } from './components/legal-modal';
 export class DoDecoderApp {
   private root: HTMLElement;
   private settings: SettingsState = {
-    defenseLevel: 'hardened' as DefenseLevel,
-    outputFormat: 'image/webp' as OutputFormat,
-    quality: 0.92,
+    quality: 0.85,
   };
   private queue: QueueItem[] = [];
   private activeAuditModal: HTMLElement | null = null;
@@ -29,25 +26,21 @@ export class DoDecoderApp {
   public render(): void {
     this.root.innerHTML = '';
 
-    // 1. Header
-    const header = renderHeader(() => this.openLegalModal());
-    this.root.appendChild(header);
-
-    // 2. Main Container
+    // Main Container (clean top, no header clutter)
     const main = document.createElement('main');
-    main.className = 'flex-1 max-w-7xl w-full mx-auto px-4 sm:px-8 py-8 flex flex-col';
+    main.className = 'flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-10 flex flex-col';
 
-    // 3. Settings HUD
+    // 1. Settings (Encoder Quality)
     const settingsPanel = renderSettingsPanel(this.settings, updated => {
       this.settings = { ...this.settings, ...updated };
     });
     main.appendChild(settingsPanel);
 
-    // 4. Dropzone
+    // 2. Dropzone (Batch processing)
     const dropzone = renderDropzone(files => this.handleFilesAdded(files));
     main.appendChild(dropzone);
 
-    // 5. Queue / Results List
+    // 3. Queue / Results List
     const queueList = renderQueueList(this.queue, {
       onDownloadSingle: item => this.handleDownloadSingle(item),
       onDownloadAllZip: () => this.handleDownloadAllZip(),
@@ -56,7 +49,7 @@ export class DoDecoderApp {
     });
     main.appendChild(queueList);
 
-    // 6. Security Footer
+    // 4. Footer (Features Dodecoder title at the bottom)
     const footer = this.createFooter();
     main.appendChild(footer);
 
@@ -65,22 +58,21 @@ export class DoDecoderApp {
 
   private createFooter(): HTMLElement {
     const footer = document.createElement('footer');
-    footer.className = 'mt-auto pt-12 pb-6 text-center text-neutral-600 text-xs font-mono border-t border-neutral-900';
+    footer.className = 'mt-auto pt-16 pb-8 text-center text-neutral-500 text-xs font-mono border-t border-neutral-900';
     footer.innerHTML = `
-      <div class="flex flex-wrap items-center justify-center gap-4 text-[11px] mb-2 text-neutral-400">
+      <div class="mb-3 space-y-1">
+        <div class="text-sm font-bold tracking-widest uppercase text-white font-mono">Dodecoder</div>
+        <div class="text-[11px] text-neutral-500">Client-Side Media Sanitization & Anti-Forensics</div>
+      </div>
+      <div class="flex flex-wrap items-center justify-center gap-3 text-[11px] text-neutral-400">
+        <span>By Mochilamv & Antigravity (AI)</span>
+        <span>•</span>
         <span>MIT License</span>
-        <span>•</span>
-        <span>Client-Side In-Memory Engine</span>
-        <span>•</span>
-        <span>By Mochilamv & Antigravity</span>
         <span>•</span>
         <button id="footer-legal-btn" class="text-neutral-400 hover:text-white underline cursor-pointer">
           Licenses & Legal
         </button>
       </div>
-      <p class="text-[10px] text-neutral-600">
-        DoDecoder Anti-Forensics Media Engine &copy; 2026 Mochilamv & Antigravity. High-performance client-side media sanitization.
-      </p>
     `;
 
     footer.querySelector('#footer-legal-btn')?.addEventListener('click', () => {
@@ -112,7 +104,7 @@ export class DoDecoderApp {
       if (item.status !== 'idle') continue;
 
       item.status = 'analyzing';
-      item.progress = 20;
+      item.progress = 25;
       this.updateQueueView();
 
       try {
@@ -120,8 +112,6 @@ export class DoDecoderApp {
         const result = await processMediaFile(
           item.file,
           {
-            defenseLevel: this.settings.defenseLevel,
-            outputFormat: this.settings.outputFormat,
             quality: this.settings.quality,
           },
           pct => {
@@ -145,7 +135,6 @@ export class DoDecoderApp {
   }
 
   private updateQueueView(): void {
-    // Re-renders the queue section in place
     const existingQueue = this.root.querySelector('#queue-items-container')?.parentElement;
     if (existingQueue) {
       const newQueue = renderQueueList(this.queue, {
@@ -201,7 +190,6 @@ export class DoDecoderApp {
   }
 
   private handleClearQueue(): void {
-    // Explicitly clean memory
     for (const item of this.queue) {
       if (item.result) {
         item.result.blob.arrayBuffer().then(buf => wipeBuffer(buf)).catch(() => {});

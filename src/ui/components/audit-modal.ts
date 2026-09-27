@@ -14,14 +14,9 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
     <div class="relative w-full max-w-5xl bg-[#080808] border border-neutral-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
       <!-- Header -->
       <div class="flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-neutral-950">
-        <div class="flex items-center gap-3">
-          <div class="w-8 h-8 rounded-lg bg-emerald-950/60 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
-            ${icons.eye}
-          </div>
-          <div>
-            <h2 class="text-sm font-bold font-mono text-white tracking-wide">FORENSIC AUDIT ROOM</h2>
-            <p class="text-[11px] text-neutral-400 font-mono">Comparative verification: Raw input vs Sanitized payload</p>
-          </div>
+        <div>
+          <h2 class="text-sm font-bold font-mono text-white tracking-wide">File Inspection</h2>
+          <p class="text-[11px] text-neutral-400 font-mono">Comparison between raw input and sanitized output</p>
         </div>
 
         <button id="modal-close" class="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer">
@@ -34,18 +29,18 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
         <!-- Visual & Hash Comparison Cards -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <!-- ORIGINAL -->
-          <div class="border border-red-900/40 bg-[#0d0909] rounded-xl p-4 space-y-3">
+          <div class="border border-red-900/40 bg-[#0c0909] rounded-xl p-4 space-y-3">
             <div class="flex items-center justify-between border-b border-red-950 pb-2">
-              <span class="text-xs font-mono font-bold text-red-400 uppercase flex items-center gap-1.5">
-                ${icons.alertTriangle} Input Artifact (Raw)
+              <span class="text-xs font-mono font-semibold text-red-400 uppercase flex items-center gap-1.5">
+                ${icons.alertTriangle} Input File
               </span>
-              <span class="text-[10px] font-mono text-neutral-500">${result.originalName}</span>
+              <span class="text-[10px] font-mono text-neutral-400 truncate max-w-[200px]">${result.originalName}</span>
             </div>
 
             <div class="aspect-video bg-black rounded-lg border border-neutral-900 overflow-hidden flex items-center justify-center relative">
               ${renderMediaPreview(origPreview, result.originalName)}
-              <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-red-500/40 text-[10px] font-mono text-red-400">
-                ${result.auditBefore.tags.length} Metadata Leaks Detected
+              <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-red-500/50 text-[10px] font-mono text-red-400">
+                ${result.auditBefore.tags.length} Metadata Tags Detected
               </div>
             </div>
 
@@ -62,24 +57,24 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
           </div>
 
           <!-- SANITIZED -->
-          <div class="border border-emerald-900/40 bg-[#080d0a] rounded-xl p-4 space-y-3">
+          <div class="border border-emerald-900/40 bg-[#070c09] rounded-xl p-4 space-y-3">
             <div class="flex items-center justify-between border-b border-emerald-950 pb-2">
-              <span class="text-xs font-mono font-bold text-emerald-400 uppercase flex items-center gap-1.5">
-                ${icons.shieldCheck} Sanitized Output (Pure Payload)
+              <span class="text-xs font-mono font-semibold text-emerald-400 uppercase flex items-center gap-1.5">
+                ${icons.shieldCheck} Clean File
               </span>
-              <span class="text-[10px] font-mono text-emerald-300">${result.sanitizedName}</span>
+              <span class="text-[10px] font-mono text-emerald-300 truncate max-w-[200px]">${result.sanitizedName}</span>
             </div>
 
             <div class="aspect-video bg-black rounded-lg border border-neutral-900 overflow-hidden flex items-center justify-center relative">
               ${renderMediaPreview(cleanPreview, result.sanitizedName)}
               <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-emerald-500/40 text-[10px] font-mono text-emerald-400 flex items-center gap-1">
-                ${icons.check} 0 Metadata Tags • Clean Bitstream
+                ${icons.check} 0 Metadata Tags • Pure Bitstream
               </div>
             </div>
 
             <div class="space-y-1 font-mono text-[11px]">
               <div class="flex justify-between text-neutral-400">
-                <span>Sanitized Size:</span>
+                <span>Clean Size:</span>
                 <span class="text-emerald-400 font-semibold">${formatBytes(result.sanitizedSize)}</span>
               </div>
               <div class="text-neutral-400">
@@ -90,14 +85,14 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
           </div>
         </div>
 
-        <!-- Metadata Tag Deep Inspection -->
+        <!-- Metadata Tag Inspection -->
         <div class="border border-neutral-800 rounded-xl bg-neutral-950 p-4 space-y-3">
           <div class="flex items-center justify-between border-b border-neutral-800 pb-2">
-            <h3 class="text-xs font-mono font-bold text-neutral-200 uppercase tracking-wider">
-              Forensic Tag Extraction Breakdown
+            <h3 class="text-xs font-mono font-semibold text-neutral-200 uppercase tracking-wider">
+              Detected Metadata
             </h3>
             <span class="text-[10px] font-mono text-neutral-400">
-              Before: <strong class="text-red-400">${result.auditBefore.tags.length}</strong> tags | After: <strong class="text-emerald-400">0</strong> tags
+              Input: <strong class="text-red-400">${result.auditBefore.tags.length}</strong> tags | Output: <strong class="text-emerald-400">0</strong> tags
             </span>
           </div>
 
@@ -108,10 +103,10 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
               <table class="w-full text-left font-mono text-xs">
                 <thead>
                   <tr class="border-b border-neutral-800 text-neutral-500 text-[10px]">
-                    <th class="py-1.5 px-2">Category</th>
-                    <th class="py-1.5 px-2">Vulnerability / Tag Name</th>
-                    <th class="py-1.5 px-2">Extracted Value</th>
-                    <th class="py-1.5 px-2">Forensic Risk</th>
+                    <th class="py-1.5 px-2">Type</th>
+                    <th class="py-1.5 px-2">Tag</th>
+                    <th class="py-1.5 px-2">Value</th>
+                    <th class="py-1.5 px-2">Severity</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-neutral-900">
@@ -126,7 +121,7 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
                         <span class="px-1.5 py-0.5 rounded text-[9px] uppercase ${
                           tag.severity === 'critical'
                             ? 'bg-red-950 text-red-400 border border-red-900'
-                            : 'bg-amber-950 text-amber-400 border border-amber-900'
+                            : 'bg-neutral-900 text-neutral-300 border border-neutral-800'
                         }">
                           ${tag.severity}
                         </span>
@@ -141,17 +136,17 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
           `
               : `
             <div class="p-3 text-center text-xs text-neutral-500 font-mono">
-              No embedded EXIF tags were present in the source input file.
+              No embedded tags found in input file.
             </div>
           `
           }
         </div>
 
-        <!-- Binary Marker & Container Structure -->
+        <!-- Binary Marker Breakdown -->
         <div class="border border-neutral-800 rounded-xl bg-neutral-950 p-4 space-y-3">
           <div class="flex items-center justify-between border-b border-neutral-800 pb-2">
-            <h3 class="text-xs font-mono font-bold text-neutral-200 uppercase tracking-wider">
-              Container Binary Segments
+            <h3 class="text-xs font-mono font-semibold text-neutral-200 uppercase tracking-wider">
+              Container Segments
             </h3>
             <span class="text-[10px] font-mono text-emerald-400">All vendor markers eliminated</span>
           </div>
@@ -159,15 +154,15 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <!-- Source Markers -->
             <div>
-              <div class="text-[11px] font-mono text-neutral-400 mb-2 font-semibold">Source Segments:</div>
+              <div class="text-[11px] font-mono text-neutral-400 mb-2 font-medium">Input Segments:</div>
               <div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                 ${result.auditBefore.markers
                   .map(
                     m => `
                   <div class="flex items-center justify-between p-2 rounded bg-black border ${
-                    m.isSanitizedSafe ? 'border-neutral-800' : 'border-red-900/50 bg-red-950/10'
+                    m.isSanitizedSafe ? 'border-neutral-800' : 'border-red-900/50 bg-red-950/20'
                   } text-[11px] font-mono">
-                    <span class="${m.isSanitizedSafe ? 'text-neutral-300' : 'text-red-400 font-semibold'}">${m.name}</span>
+                    <span class="${m.isSanitizedSafe ? 'text-neutral-300' : 'text-red-400 font-medium'}">${m.name}</span>
                     <span class="text-[10px] text-neutral-500">${m.marker}</span>
                   </div>
                 `
@@ -178,7 +173,7 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
 
             <!-- Sanitized Markers -->
             <div>
-              <div class="text-[11px] font-mono text-neutral-400 mb-2 font-semibold">Sanitized Clean Stream:</div>
+              <div class="text-[11px] font-mono text-neutral-400 mb-2 font-medium">Clean Segments:</div>
               <div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                 ${result.auditAfter.markers
                   .map(
@@ -195,13 +190,13 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
           </div>
         </div>
 
-        <!-- Defense Report Summary -->
+        <!-- Defense Summary -->
         <div class="p-3.5 rounded-xl border border-neutral-800 bg-black flex items-center justify-between text-xs font-mono">
           <div class="flex items-center gap-2 text-neutral-300">
             ${icons.shieldCheck}
-            <span>Applied Defense: <strong class="text-white uppercase">${result.defenseLevel}</strong> Mode</span>
+            <span>Full Reconstruction & Noise Disruption Applied</span>
           </div>
-          <span class="text-[11px] text-neutral-500">Processed in RAM • Zero Trace</span>
+          <span class="text-[11px] text-neutral-500">In-Memory • No Server Upload</span>
         </div>
       </div>
     </div>
