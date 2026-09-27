@@ -378,7 +378,7 @@ function inspectWebPChunks(_bytes: Uint8Array, view: DataView): MarkerInfo[] {
       case FOURCC_WEBP_ALPH:
         chunkName = 'ALPH';
         isSafe = true;
-        description = 'Canal de transparência alfa dos pixels reconstruídos';
+        description = 'Alpha transparency channel for reconstructed pixels';
         break;
       default:
         chunkName = 'CHUNK';

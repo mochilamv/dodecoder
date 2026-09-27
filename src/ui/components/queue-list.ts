@@ -126,7 +126,7 @@ export function renderQueueList(
               ${
                 item.result.isBypass
                   ? `
-                <span class="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 bg-neutral-900 text-neutral-300 font-mono" title="Sem metadados originais: bitstream 1:1 preservado">
+                <span class="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 bg-neutral-900 text-neutral-300 font-mono" title="No original metadata: 1:1 bitstream preserved">
                   STRIP ONLY (1:1)
                 </span>
               `

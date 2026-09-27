@@ -56,7 +56,7 @@ Dodecoder does not perform in-place tag editing. Instead, it fully reconstructs 
   - Restricts stochastic noise injection and Lossy 85% compression strictly to photographic JPEGs where physical PRNU silicon noise actually exists.
 - **Post-Processing Bloat Fallback:**
   - If canvas re-encoding results in a clean blob larger than the original input file, the canvas output is discarded.
-  - Applies surgical binary stripping of metadata segments/chunks directly on the original bitstream, guaranteeing zero size inflation and flagging the UI with a `"Tamanho inflado por injeção de entropia"` alert.
+  - Applies surgical binary stripping of metadata segments/chunks directly on the original bitstream, guaranteeing zero size inflation and flagging the UI with a `"Size inflated by entropy injection"` alert.
 - **Audio ID3 Stripping:**
   - Extracts pure audio payload frames from MP3/WAV/OGG files, discarding ID3v1 and ID3v2 tags.
 

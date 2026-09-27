@@ -78,7 +78,7 @@ export function isNonPhotographicImage(
     return false;
   }
 
-  // Formatos fora de JPEG/PNG: fallback seguro para Lossless sem ruído
+  // Formats outside JPEG/PNG: safe fallback to Lossless without noise
   return true;
 }
 
@@ -148,7 +148,7 @@ export async function sanitizeImage(
   const bitmap = await createImageBitmap(file);
   onProgress?.(45);
 
-  // --- ITEM 2: Roteamento de Compressão Inteligente (Lossy vs Lossless) ---
+  // --- ITEM 2: Intelligent Compression Routing (Lossy vs Lossless) ---
   const isNonPhoto = isNonPhotographicImage(bitmap, file.type, originalName);
   const skipNoise = isNonPhoto;
 
@@ -156,11 +156,11 @@ export async function sanitizeImage(
   let effectiveQuality = options.quality ?? 0.85;
 
   if (isNonPhoto) {
-    // Não-fotográfica -> WebP Lossless, sem injeção de ruído
+    // Non-photographic -> WebP Lossless, no noise injection
     effectiveMime = targetMime === 'image/png' ? 'image/png' : 'image/webp';
     effectiveQuality = 1.0;
   } else {
-    // Fotográfica (JPEG real, alta variância) -> Lossy 85% + injeção de ruído estocástico
+    // Photographic (real JPEG, high variance) -> Lossy 85% + stochastic noise injection
     effectiveQuality = options.quality ?? 0.85;
   }
 
@@ -209,13 +209,13 @@ export async function sanitizeImage(
   let finalBytes = strippedBytes;
   let warningBadge: string | undefined;
 
-  // --- ITEM 3: Fallback de Inchaço Pós-Processamento ---
-  // Condição: na validação final, Blob limpo > arquivo de entrada
+  // --- ITEM 3: Post-Processing Bloat Fallback ---
+  // Condition: in final validation, clean Blob > input file
   if (cleanBlob.size > originalSize) {
-    warningBadge = 'Tamanho inflado por injeção de entropia';
+    warningBadge = 'Size inflated by entropy injection';
 
-    // Descartar o resultado do canvas e aplicar remoção cirúrgica dos segments/chunks de metadado
-    // diretamente nos bytes originais (sem recompressão via canvas)
+    // Discard canvas result and apply surgical removal of metadata segments/chunks
+    // directly on original bytes (without canvas recompression)
     const surgicalBytes = stripAllMetadataSurgical(originalBytes, file.type || effectiveMime);
     finalBytes = surgicalBytes;
     cleanBlob = new Blob([surgicalBytes as any], { type: file.type || effectiveMime });
