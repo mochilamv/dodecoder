@@ -1,0 +1,24 @@
+{
+  "name": "site-dodecoder",
+  "version": "1.0.0",
+  "description": "Client-Side Media Anti-Forensics and Anonymization Engine",
+  "author": "Mochilamv & Antigravity (AI)",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "tsx --test tests/anti-forensics.test.ts"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.1"
+  },
+  "dependencies": {
+    "jszip": "^3.10.2"
+  }
+}

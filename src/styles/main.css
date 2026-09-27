@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-black: #000000;
+    --card-surface: #0a0a0a;
+    --card-border: rgba(255, 255, 255, 0.1);
+  }
+
+  body {
+    background-color: #000000;
+    color: #e5e5e5;
+  }
+}
+
+/* Custom scrollbar for deep black aesthetics */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #000000;
+}
+::-webkit-scrollbar-thumb {
+  background: #262626;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #404040;
+}
+
+/* Forensic scanning radar animation */
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(1000%);
+  }
+}
+
+.animate-scanline {
+  animation: scanline 3s linear infinite;
+}
