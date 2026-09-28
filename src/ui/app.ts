@@ -12,6 +12,7 @@ export class DoDecoderApp {
   private root: HTMLElement;
   private settings: SettingsState = {
     quality: 0.85,
+    extremeSanitization: false,
   };
   private queue: QueueItem[] = [];
   private activeAuditModal: HTMLElement | null = null;
@@ -113,6 +114,7 @@ export class DoDecoderApp {
           item.file,
           {
             quality: this.settings.quality,
+            extremeSanitization: this.settings.extremeSanitization,
           },
           pct => {
             item.progress = pct;

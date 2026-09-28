@@ -4,11 +4,13 @@ import { countSuspiciousMetadataTags } from '../forensic/marker-parser';
 import { generateEphemeralSaltedName } from '../forensic/hash-naming';
 import { applyPrnuDefense } from './prnu-defense';
 import { stripDisplayColorProfiles, stripAllMetadataSurgical } from './icc-sanitizer';
+import { applyDeepDecontamination } from './decontamination';
 
 export interface ImageSanitizerOptions {
   defenseLevel: DefenseLevel;
   outputFormat: OutputFormat;
   quality?: number; // 0.85 - 0.95
+  extremeSanitization?: boolean;
 }
 
 /**
@@ -117,9 +119,10 @@ export async function sanitizeImage(
   }
   const ext = targetMime === 'image/webp' ? 'webp' : targetMime === 'image/png' ? 'png' : 'jpg';
 
-  // --- ITEM 1: Fast-Track de Bypass ("Strip Only") ---
+  // --- ITEM 1: Fast-Track Bypass ("Strip Only") ---
   const suspiciousCount = countSuspiciousMetadataTags(originalBytes, file.type);
-  if (suspiciousCount === 0) {
+  const shouldBypass = suspiciousCount === 0 && !options.extremeSanitization;
+  if (shouldBypass) {
     onProgress?.(80);
     const cleanBlob = new Blob([originalBytes as any], { type: targetMime });
     const sanitizedName = await generateEphemeralSaltedName(originalBytes, ext);
@@ -140,6 +143,7 @@ export async function sanitizeImage(
       auditAfter,
       processedAt: Date.now(),
       isBypass: true,
+      extremeSanitization: options.extremeSanitization,
     };
   }
 
@@ -148,14 +152,22 @@ export async function sanitizeImage(
   const bitmap = await createImageBitmap(file);
   onProgress?.(45);
 
-  // --- ITEM 2: Intelligent Compression Routing (Lossy vs Lossless) ---
+  // --- ITEM 2: Intelligent Compression Routing (Lossy vs Lossless) & Decontamination ---
   const isNonPhoto = isNonPhotographicImage(bitmap, file.type, originalName);
-  const skipNoise = isNonPhoto;
+  let isDeepDecontaminated = false;
 
   let effectiveMime = targetMime;
   let effectiveQuality = options.quality ?? 0.85;
+  let skipNoise = isNonPhoto;
 
-  if (isNonPhoto) {
+  if (options.extremeSanitization && isNonPhoto) {
+    // Extreme Sanitization overrides format routing:
+    // Forces Lossy VP8 quantization to destroy leftover carrier signals
+    effectiveMime = 'image/webp';
+    effectiveQuality = options.quality ?? 0.85;
+    skipNoise = false;
+    isDeepDecontaminated = true;
+  } else if (isNonPhoto) {
     // Non-photographic -> WebP Lossless, no noise injection
     effectiveMime = targetMime === 'image/png' ? 'image/png' : 'image/webp';
     effectiveQuality = 1.0;
@@ -180,6 +192,11 @@ export async function sanitizeImage(
 
   // 4. Apply Anti-PRNU & Geometric Re-alignment
   applyPrnuDefense(bitmap, canvas, options.defenseLevel, needsAlpha, skipNoise);
+
+  // 4b. Apply Anti-Steganography Deep Decontamination if active
+  if (isDeepDecontaminated) {
+    applyDeepDecontamination(canvas, needsAlpha);
+  }
   onProgress?.(70);
 
   // 5. Re-encode via canvas
@@ -210,8 +227,9 @@ export async function sanitizeImage(
   let warningBadge: string | undefined;
 
   // --- ITEM 3: Post-Processing Bloat Fallback ---
-  // Condition: in final validation, clean Blob > input file
-  if (cleanBlob.size > originalSize) {
+  // Condition: in final validation, clean Blob > input file.
+  // Note: if deep decontamination was applied, do not revert to original un-decontaminated bytes.
+  if (!isDeepDecontaminated && cleanBlob.size > originalSize) {
     warningBadge = 'Size inflated by entropy injection';
 
     // Discard canvas result and apply surgical removal of metadata segments/chunks
@@ -242,5 +260,7 @@ export async function sanitizeImage(
     auditAfter,
     processedAt: Date.now(),
     warningBadge,
+    isDeepDecontaminated,
+    extremeSanitization: options.extremeSanitization,
   };
 }

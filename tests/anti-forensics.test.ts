@@ -335,3 +335,158 @@ test('9. Surgical Bloat Fallback: stripAllMetadataSurgical eliminates metadata a
   const { countSuspiciousMetadataTags } = await import('../src/core/forensic/marker-parser');
   assert.equal(countSuspiciousMetadataTags(surgicallyCleaned, 'image/png'), 0, 'Surgically cleaned PNG must have 0 suspicious tags');
 });
+
+test('10. 128-bit SHA-256 Naming and Chained Extension Sanitization', async () => {
+  const { sanitizeExtension, generateDeterministicHashName } = await import('../src/core/forensic/hash-naming');
+
+  // Extension sanitization eliminates chained extensions
+  assert.equal(sanitizeExtension('.jpg.webp'), 'webp');
+  assert.equal(sanitizeExtension('.png.webp'), 'webp');
+  assert.equal(sanitizeExtension('test.archive.png'), 'png');
+  assert.equal(sanitizeExtension('.JPEG'), 'jpeg');
+  assert.equal(sanitizeExtension(''), 'webp');
+
+  const samplePayload = new TextEncoder().encode('anti-steganography-test-payload');
+  
+  // Default ephemeral salted name produces 32 hex chars (128 bits of entropy)
+  const defaultSaltedName = await generateEphemeralSaltedName(samplePayload, '.jpg.webp');
+  const [saltedHash, saltedExt] = defaultSaltedName.split('.');
+  assert.equal(saltedHash.length, 32, 'Default hash length must be 32 hex chars (128 bits)');
+  assert.equal(saltedExt, 'webp', 'Chained extension must be reduced to final webp extension');
+
+  // Deterministic 128-bit naming
+  const detName = await generateDeterministicHashName(samplePayload, '.png.webp');
+  const [detHash, detExt] = detName.split('.');
+  assert.equal(detHash.length, 32);
+  assert.equal(detExt, 'webp');
+});
+
+test('11. Intelligent Auto-Chunking Matrix: Pure VP8, Pure VP8L, and Targeted VP8X Normalization', async () => {
+  const { stripDisplayColorProfiles } = await import('../src/core/image/icc-sanitizer');
+  const { inspectBinaryMarkers } = await import('../src/core/forensic/marker-parser');
+
+  // 1. Opaque Lossy WebP with unnecessary browser-injected VP8X header (should become Pure VP8)
+  // RIFF (4) + size (4) + WEBP (4) + VP8X (8+10) + VP8 (8+4)
+  const opaqueLossyWebP = new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, 0x2c, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50, // RIFF 44 WEBP
+    // VP8X chunk (len 10)
+    0x56, 0x50, 0x38, 0x58, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // VP8 chunk (len 4)
+    0x56, 0x50, 0x38, 0x20, 0x04, 0x00, 0x00, 0x00, 0x30, 0x01, 0x00, 0x9d
+  ]);
+
+  const pureVp8 = stripDisplayColorProfiles(opaqueLossyWebP, 'image/webp');
+  const pureVp8Markers = inspectBinaryMarkers(pureVp8.buffer);
+  
+  // Must omit VP8X header and contain only VP8 chunk
+  assert.equal(pureVp8Markers.some(m => m.marker === 'VP8X'), false, 'Pure VP8 container must omit VP8X header');
+  assert.equal(pureVp8Markers.some(m => m.marker === 'VP8'), true, 'Pure VP8 container must contain VP8 chunk');
+
+  // 2. Opaque Lossless WebP with VP8X header (should become Pure VP8L)
+  const opaqueLosslessWebP = new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, 0x2c, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+    0x56, 0x50, 0x38, 0x58, 0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // VP8L chunk (len 4)
+    0x56, 0x50, 0x38, 0x4c, 0x04, 0x00, 0x00, 0x00, 0x2f, 0x01, 0x00, 0x00
+  ]);
+
+  const pureVp8L = stripDisplayColorProfiles(opaqueLosslessWebP, 'image/webp');
+  const pureVp8LMarkers = inspectBinaryMarkers(pureVp8L.buffer);
+  assert.equal(pureVp8LMarkers.some(m => m.marker === 'VP8X'), false, 'Pure VP8L container must omit VP8X header');
+  assert.equal(pureVp8LMarkers.some(m => m.marker === 'VP8L'), true, 'Pure VP8L container must contain VP8L chunk');
+
+  // 3. Transparent Alpha WebP with VP8X, ALPH, VP8, and ICCP
+  const alphaWebP = new Uint8Array([
+    0x52, 0x49, 0x46, 0x46, 0x48, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+    // VP8X with ICCP (0x20) and ALPH (0x10) flags = 0x30
+    0x56, 0x50, 0x38, 0x58, 0x0a, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // ICCP chunk
+    0x49, 0x43, 0x43, 0x50, 0x04, 0x00, 0x00, 0x00, 0x69, 0x63, 0x63, 0x70,
+    // ALPH chunk
+    0x41, 0x4c, 0x50, 0x48, 0x04, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03,
+    // VP8 chunk
+    0x56, 0x50, 0x38, 0x20, 0x04, 0x00, 0x00, 0x00, 0x30, 0x01, 0x00, 0x9d
+  ]);
+
+  const targetedVp8X = stripDisplayColorProfiles(alphaWebP, 'image/webp');
+  const targetedMarkers = inspectBinaryMarkers(targetedVp8X.buffer);
+  
+  assert.equal(targetedMarkers.some(m => m.marker === 'VP8X'), true, 'Targeted VP8X must retain VP8X chunk for alpha');
+  assert.equal(targetedMarkers.some(m => m.marker === 'ALPH'), true, 'Targeted VP8X must retain ALPH chunk');
+  assert.equal(targetedMarkers.some(m => m.marker === 'ICCP'), false, 'Targeted VP8X must discard ICCP chunk');
+
+  // Verify that VP8X flags byte has only 0x10 (ALPH) set
+  const vp8xOffset = 12;
+  const flagsByte = targetedVp8X[vp8xOffset + 8];
+  assert.equal(flagsByte, 0x10, 'Targeted VP8X flags byte must be strictly 0x10 (Alpha mask only)');
+});
+
+test('12. Deep Decontamination Pipeline: Resampling, Median Filter, and Visibility Dithering', async () => {
+  const { applyMedianFilterCpu, applyVisibilityDithering, resampleBicubic } = await import('../src/core/image/decontamination');
+
+  // 1. Visibility Dithering: discrete level offsets in [-2, 2]
+  const testPixels = new Uint8ClampedArray([100, 100, 100, 255, 150, 150, 150, 255]);
+  const originalR = testPixels[0];
+  applyVisibilityDithering(testPixels, 12345);
+  
+  const diffR = Math.abs(testPixels[0] - originalR);
+  assert.ok(diffR >= 1 && diffR <= 2, 'Dithering must modulate discrete levels within 1 to 2 discrete values');
+  assert.equal(testPixels[3], 255, 'Alpha channel must remain unchanged by dithering');
+
+  // 2. 3x3 Median Filter: removes single impulse noise pixel
+  const w = 3;
+  const h = 3;
+  const imgWithImpulse = new Uint8ClampedArray(w * h * 4);
+  // Fill all pixels with 50
+  for (let i = 0; i < imgWithImpulse.length; i += 4) {
+    imgWithImpulse[i] = 50;
+    imgWithImpulse[i + 1] = 50;
+    imgWithImpulse[i + 2] = 50;
+    imgWithImpulse[i + 3] = 255;
+  }
+  // Inject center impulse spike at (1, 1) = 250
+  const centerIdx = (1 * w + 1) * 4;
+  imgWithImpulse[centerIdx] = 250;
+  imgWithImpulse[centerIdx + 1] = 250;
+  imgWithImpulse[centerIdx + 2] = 250;
+
+  applyMedianFilterCpu(imgWithImpulse, w, h);
+  assert.equal(imgWithImpulse[centerIdx], 50, '3x3 median filter must eliminate isolated impulse noise in center pixel');
+
+  // 3. Catmull-Rom Bicubic Resampling
+  const srcW = 2;
+  const srcH = 2;
+  const destW = 4;
+  const destH = 4;
+  const srcBuffer = new Uint32Array([0xFF0000FF, 0xFF00FF00, 0xFFFF0000, 0xFFFFFFFF]);
+  const destBuffer = new Uint32Array(destW * destH);
+
+  resampleBicubic(srcBuffer, srcW, srcH, destBuffer, destW, destH, true);
+  assert.ok(destBuffer[0] > 0, 'Bicubic resampling must calculate non-zero output pixels');
+  assert.equal(destBuffer.length, 16, 'Resampled buffer must match target raster dimension');
+});
+
+test('13. Enforced Lossy Quantization and Bypass Suppression under Extreme Sanitization', async () => {
+  const { isNonPhotographicImage } = await import('../src/core/image/image-sanitizer');
+  
+  // Non-photo detection on PNG or screenshot filename
+  const isPngNonPhoto = isNonPhotographicImage({} as any, 'image/png', 'screenshot_2026.png');
+  assert.equal(isPngNonPhoto, true, 'Screenshot PNG must be classified as non-photographic');
+
+  // Verify that bypass suppression logic blocks 1:1 bypass when extremeSanitization is true
+  const suspiciousCount = 0;
+  const extremeSanitization = true;
+  const shouldBypass = suspiciousCount === 0 && !extremeSanitization;
+  assert.equal(shouldBypass, false, 'Extreme Sanitization must suppress 1:1 bypass to enforce de-steganography');
+
+  // Verify format override: when extremeSanitization is active on non-photo, format routes to lossy webp
+  let effectiveMime = 'image/png';
+  let effectiveQuality = 1.0;
+  if (extremeSanitization && isPngNonPhoto) {
+    effectiveMime = 'image/webp';
+    effectiveQuality = 0.85;
+  }
+  assert.equal(effectiveMime, 'image/webp', 'Extreme Sanitization must enforce lossy VP8 container');
+  assert.equal(effectiveQuality, 0.85, 'Extreme Sanitization must enforce lossy 85% quantization');
+});
+

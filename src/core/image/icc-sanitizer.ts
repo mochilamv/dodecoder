@@ -193,8 +193,20 @@ function stripJpegColorProfiles(input: Uint8Array): Uint8Array {
   return output.subarray(0, writePos);
 }
 
+// WebP Chunk FourCC Constants
+const WEBP_VP8X = 0x56503858; // 'VP8X'
+const WEBP_ALPH = 0x414c5048; // 'ALPH'
+const WEBP_VP8_ = 0x56503820; // 'VP8 '
+const WEBP_VP8L = 0x5650384c; // 'VP8L'
+const WEBP_ANIM = 0x414e494d; // 'ANIM'
+const WEBP_ANMF = 0x414e4d46; // 'ANMF'
+
 /**
- * Strips ICCP, EXIF, and XMP chunks from a WebP stream and clears VP8X flags.
+ * Strips ICCP, EXIF, and XMP chunks from a WebP stream.
+ * Normalizes container according to the Intelligent Auto-Chunking Matrix:
+ * - Pure VP8 (Lossy): omits VP8X header when no alpha channel exists.
+ * - Pure VP8L (Lossless): omits VP8X header when no alpha channel exists.
+ * - Targeted VP8X (Extended): retains VP8X with flags strictly set to 0x10 for ALPH.
  */
 function stripWebpColorProfiles(input: Uint8Array): Uint8Array {
   if (input.length < 12) return input;
@@ -204,12 +216,13 @@ function stripWebpColorProfiles(input: Uint8Array): Uint8Array {
     return input;
   }
 
-  const output = new Uint8Array(input.length);
-  output.set(input.subarray(0, 12), 0);
-  const outView = new DataView(output.buffer, output.byteOffset, output.byteLength);
+  // Pass 1: Inspect chunks to detect alpha transparency and animation
+  let hasAlph = false;
+  let hasAnim = false;
+  let vp8xChunk: { offset: number; totalLen: number } | null = null;
+  const safeChunks: Array<{ offset: number; totalLen: number; type: number }> = [];
 
   let readPos = 12;
-  let writePos = 12;
   const len = input.length;
 
   while (readPos + 8 <= len) {
@@ -220,25 +233,48 @@ function stripWebpColorProfiles(input: Uint8Array): Uint8Array {
 
     if (readPos + totalChunkLen > len) break;
 
-    // Discard ICCP / EXIF / XMP chunks
-    if (chunkType === WEBP_ICCP || chunkType === WEBP_EXIF || chunkType === WEBP_XMP) {
-      readPos += totalChunkLen;
-      continue;
+    if (chunkType === WEBP_ALPH) {
+      hasAlph = true;
+      safeChunks.push({ offset: readPos, totalLen: totalChunkLen, type: chunkType });
+    } else if (chunkType === WEBP_ANIM || chunkType === WEBP_ANMF) {
+      hasAnim = true;
+      safeChunks.push({ offset: readPos, totalLen: totalChunkLen, type: chunkType });
+    } else if (chunkType === WEBP_VP8X) {
+      vp8xChunk = { offset: readPos, totalLen: totalChunkLen };
+    } else if (chunkType === WEBP_VP8_ || chunkType === WEBP_VP8L) {
+      safeChunks.push({ offset: readPos, totalLen: totalChunkLen, type: chunkType });
+    } else if (chunkType === WEBP_ICCP || chunkType === WEBP_EXIF || chunkType === WEBP_XMP) {
+      // Discard forbidden metadata chunks
+    } else {
+      // Retain other safe payload chunks
+      safeChunks.push({ offset: readPos, totalLen: totalChunkLen, type: chunkType });
     }
 
-    // Clear ICC, EXIF, and XMP flags in VP8X chunk if present
-    if (chunkType === 0x56503858 /* VP8X */ && chunkLen >= 10) {
-      output.set(input.subarray(readPos, readPos + totalChunkLen), writePos);
-      // Bit 5 = ICC (0x20), Bit 3 = EXIF (0x08), Bit 2 = XMP (0x04)
-      output[writePos + 8] &= ~(0x20 | 0x08 | 0x04);
-      writePos += totalChunkLen;
-      readPos += totalChunkLen;
-      continue;
-    }
-
-    output.set(input.subarray(readPos, readPos + totalChunkLen), writePos);
-    writePos += totalChunkLen;
     readPos += totalChunkLen;
+  }
+
+  // Pass 2: Reconstruct minimal container layout
+  const output = new Uint8Array(input.length);
+  output.set(input.subarray(0, 12), 0);
+  const outView = new DataView(output.buffer, output.byteOffset, output.byteLength);
+  let writePos = 12;
+
+  const requiresVp8x = hasAlph || hasAnim;
+
+  if (requiresVp8x && vp8xChunk) {
+    // Targeted VP8X: Flags set strictly to 0x10 for ALPH (or 0x02 for animation)
+    output.set(input.subarray(vp8xChunk.offset, vp8xChunk.offset + vp8xChunk.totalLen), writePos);
+    let flags = 0;
+    if (hasAlph) flags |= 0x10;
+    if (hasAnim) flags |= 0x02;
+    output[writePos + 8] = flags;
+    writePos += vp8xChunk.totalLen;
+  }
+  // When requiresVp8x is false, VP8X header is omitted, generating Pure VP8 or Pure VP8L
+
+  for (const chunk of safeChunks) {
+    output.set(input.subarray(chunk.offset, chunk.offset + chunk.totalLen), writePos);
+    writePos += chunk.totalLen;
   }
 
   // Update RIFF total size

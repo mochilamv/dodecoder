@@ -52,6 +52,8 @@ export interface SanitizedResult {
   processedAt: number;
   warningBadge?: string;
   isBypass?: boolean;
+  isDeepDecontaminated?: boolean;
+  extremeSanitization?: boolean;
 }
 
 export interface QueueItem {

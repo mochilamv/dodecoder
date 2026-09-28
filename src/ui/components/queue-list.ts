@@ -124,10 +124,19 @@ export function renderQueueList(
                   : ''
               }
               ${
+                item.result.isDeepDecontaminated
+                  ? `
+                <span class="text-[10px] px-1.5 py-0.5 rounded border border-purple-500/50 bg-purple-950/40 text-purple-300 font-mono" title="Anti-steganography pipeline applied: spatial micro-resampling, 3x3 median filter, and visibility dithering">
+                  DECONTAMINATED
+                </span>
+              `
+                  : ''
+              }
+              ${
                 item.result.isBypass
                   ? `
                 <span class="text-[10px] px-1.5 py-0.5 rounded border border-neutral-700 bg-neutral-900 text-neutral-300 font-mono" title="No original metadata: 1:1 bitstream preserved">
-                  STRIP ONLY (1:1)
+                  STRIP ONLY 1:1
                 </span>
               `
                   : ''

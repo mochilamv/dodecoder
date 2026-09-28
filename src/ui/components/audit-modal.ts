@@ -96,11 +96,21 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
             : ''
         }
         ${
+          result.isDeepDecontaminated
+            ? `
+          <div class="p-3 rounded-xl border border-purple-500/50 bg-purple-950/30 text-purple-300 text-xs font-mono flex items-center gap-2.5">
+            <span class="text-purple-400 shrink-0">${icons.shield}</span>
+            <span><strong>Anti-Steganography Pipeline:</strong> Spatial micro-resampling, hardware-accelerated 3x3 median filtering, visibility dithering, and lossy VP8 quantization applied to destroy steganographic watermarks and tracking signals.</span>
+          </div>
+        `
+            : ''
+        }
+        ${
           result.isBypass
             ? `
           <div class="p-3 rounded-xl border border-neutral-700 bg-neutral-900/60 text-neutral-300 text-xs font-mono flex items-center gap-2.5">
             <span class="text-emerald-400 shrink-0">${icons.check}</span>
-            <span><strong>Fast-Track Bypass (1:1):</strong> 0 suspicious metadata tags detected. Original bitstream preserved directly without re-encoding.</span>
+            <span><strong>Fast-Track Bypass 1:1:</strong> 0 suspicious metadata tags detected. Original bitstream preserved directly without re-encoding.</span>
           </div>
         `
             : ''
