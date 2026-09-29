@@ -50,8 +50,6 @@ export interface SanitizedResult {
   auditBefore: ForensicReport;
   auditAfter: ForensicReport;
   processedAt: number;
-  warningBadge?: string;
-  isBypass?: boolean;
   isDeepDecontaminated?: boolean;
   extremeSanitization?: boolean;
 }

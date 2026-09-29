@@ -37,8 +37,8 @@ export function renderSettingsPanel(
             <label for="extreme-toggle" class="text-xs font-mono font-semibold uppercase tracking-wider text-neutral-300 cursor-pointer">
               Extreme Sanitization
             </label>
-            <span class="text-[10px] text-amber-400 bg-amber-950/60 border border-amber-800/60 px-1.5 py-0.5 rounded font-mono font-normal">
-              Recommended for VP8L
+            <span class="text-[10px] text-purple-400 bg-purple-950/60 border border-purple-800/60 px-1.5 py-0.5 rounded font-mono font-normal">
+              Deep Decontamination
             </span>
           </div>
           <p class="text-[11px] text-neutral-400">

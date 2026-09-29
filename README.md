@@ -32,18 +32,17 @@ Dodecoder reconstructs and normalizes media bitstreams directly in memory:
 - **Mathematical PRNU Disruption:**
   - Applies a non-deterministic Inverse Affine Transformation with random rotation in range 0.1° to 0.3° combined with anisotropic scaling driven by hardware entropy via `crypto.getRandomValues`.
   - Employs a high-performance Digital Differential Analyzer loop with a 16-tap Catmull-Rom bicubic interpolation kernel and XorShift32 micro-dithering, collapsing Peak-to-Correlation Energy without visible quality loss.
-- **Intelligent Auto-Chunking Matrix:**
-  - Evaluates input headers and payload entropy in memory to route each file into its minimal container layout:
-    - **Camera Capture:** High localized entropy, ISO noise floor, JPEG APP1 markers $\to$ **Pure VP8 Lossy**. Strips APP0-APP15, drops ICC profiles, applies lossy quantization, omits VP8X header.
-    - **UI Screenshot or Text:** Uniform color planes, low unique color count, sharp edge transitions $\to$ **Pure VP8L Lossless**. Preserves pixel-exact glyph clarity, omits VP8X header, keeps file size minimal.
-    - **Alpha Media:** Explicit alpha transparency byte detected in pixel stream $\to$ **Targeted VP8X Extended**. Flags only the ALPH bitmask `0x10`, discards ICCP, EXIF, and XMP chunks.
-- **Extreme Sanitization & Deep Decontamination Pipeline:**
-  - Enforces OPSEC-grade anti-steganography and camera sensor disruption:
-    - **Spatial Micro-Resampling:** Scales the canvas to 99.5%, then resamples back to 100% using Catmull-Rom bicubic interpolation to recalculate weighted pixel averages across the raster.
-    - **Hardware-Accelerated 3x3 Median Filter:** WebGL fragment shader calculates the median value of every 3x3 neighborhood with automatic CPU fallback, eliminating low-amplitude periodic modulations while keeping edge boundaries sharp.
-    - **Visibility-Threshold Dithering:** Injects deterministic pseudo-random offsets in range -2 to 2 discrete levels across RGB channels in Uint8ClampedArray, corrupting watermark parity checks without human-visible variance.
-    - **Forced YUV 4:2:0 Chroma Subsampling:** Averages Cb and Cr across 2x2 pixel blocks using ITU-R BT.601 coefficients while preserving full-resolution Luma. Eradicates color-channel anchored steganographic payloads and carrier modulations.
-    - **Enforced 60% Lossy Quantization:** Encoder quality is locked strictly to 0.60 to disrupt PRNU sensor prints and carrier grids.
+- **Unified Lossy VP8 Pipeline:**
+  - 100 percent of decoded image payloads route exclusively through the lossy VP8 encoder.
+  - Complete elimination of WebP Lossless VP8L, screenshot detection, and image variance heuristics.
+  - Encoder quality is locked strictly to 0.60 to disrupt PRNU sensor prints and carrier grids.
+  - Visual text ringing and UI artifacting are explicit and accepted outcomes of the quantization matrix.
+- **Unconditional Stochastic Affine Perturbation & Noise Dithering:**
+  - Executes random rotation in range 0.1° to 0.3° combined with anisotropic scaling driven by hardware entropy via `crypto.getRandomValues`.
+  - Executes random noise dithering unconditionally across all canvas contexts, collapsing Peak-to-Correlation Energy.
+  - Applies forced YUV 4:2:0 Chroma Subsampling across all processed images, averaging Cb and Cr in 2x2 blocks to eradicate color-channel anchored steganographic payloads.
+- **Extreme Sanitization & Deep Decontamination:**
+  - Optional multi-stage spatial micro-resampling, hardware-accelerated 3x3 median filtering, and visibility dithering for high-threat threat models.
 - **Idempotent 128-bit SHA-256 Naming:**
   - Computes pure SHA-256 exclusively on the sanitized bitstream without random salt to restore deduplication idempotency across systems.
   - Slices strictly to the first 32 hexadecimal characters, providing 128 bits of entropy formatted as `[32_character_hex].[extension]`.
@@ -64,6 +63,7 @@ Dodecoder reconstructs and normalizes media bitstreams directly in memory:
   - Fast-Track 1:1 bypass is permanently disabled across JPEG, PNG, WebP, BMP, and TIFF to prevent PRNU and sensor fingerprint leakage.
   - Guaranteed cryptographic divergence: output SHA-256 strictly diverges from input SHA-256 for all images.
   - In-place structural manipulation via DataView and free atom substitution is isolated strictly to MP4, MOV, and audio assets.
+  - Bloat fallback routines and size inflation warnings are completely removed.
 
 ---
 

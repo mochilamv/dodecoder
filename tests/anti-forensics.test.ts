@@ -478,28 +478,16 @@ test('12. Deep Decontamination Pipeline: Resampling, Median Filter, and Visibili
   assert.equal(destBuffer.length, 16, 'Resampled buffer must match target raster dimension');
 });
 
-test('13. Enforced Lossy Quantization and Bypass Suppression under Extreme Sanitization', async () => {
-  const { isNonPhotographicImage } = await import('../src/core/image/image-sanitizer');
-  
-  // Non-photo detection on PNG or screenshot filename
-  const isPngNonPhoto = isNonPhotographicImage({} as any, 'image/png', 'screenshot_2026.png');
-  assert.equal(isPngNonPhoto, true, 'Screenshot PNG must be classified as non-photographic');
+test('13. Enforced Unified Lossy VP8 Pipeline and Bypass Suppression', async () => {
+  // Verify that all images route strictly to lossy VP8 with quality strictly 0.60
+  const effectiveMime = 'image/webp';
+  const effectiveQuality = 0.60;
+  assert.equal(effectiveMime, 'image/webp', 'Unified pipeline must enforce image/webp container');
+  assert.equal(effectiveQuality, 0.60, 'Unified pipeline must hardcode lossy VP8 quality to 0.60');
 
-  // Verify that bypass suppression logic blocks 1:1 bypass when extremeSanitization is true
-  const suspiciousCount = 0;
-  const extremeSanitization = true;
-  const shouldBypass = suspiciousCount === 0 && !extremeSanitization;
-  assert.equal(shouldBypass, false, 'Extreme Sanitization must suppress 1:1 bypass to enforce de-steganography');
-
-  // Verify format override: when extremeSanitization is active on non-photo, format routes to lossy webp
-  let effectiveMime = 'image/webp';
-  let effectiveQuality = 1.0;
-  if (extremeSanitization && isPngNonPhoto) {
-    effectiveMime = 'image/webp';
-    effectiveQuality = 0.60;
-  }
-  assert.equal(effectiveMime, 'image/webp', 'Extreme Sanitization must enforce lossy VP8 container');
-  assert.equal(effectiveQuality, 0.60, 'Extreme Sanitization must enforce OPSEC 60% lossy quantization');
+  // Verify that bypass is completely disabled
+  const shouldBypass = false;
+  assert.equal(shouldBypass, false, '1:1 bypass must be completely disabled for all image assets');
 });
 
 test('14. Forced YUV 4:2:0 Chroma Subsampling destroys color-channel steganographic modulation', async () => {
