@@ -1,250 +1,143 @@
 import { DefenseLevel, SanitizedResult } from '../types';
 import { analyzeForensics } from '../forensic/exif-inspector';
-import { generateEphemeralSaltedName } from '../forensic/hash-naming';
+import { generateSanitizedName } from '../forensic/hash-naming';
 
 export interface MediaSanitizerOptions {
   defenseLevel: DefenseLevel;
 }
 
 // FourCC Integer constants for branchless matching
-const FOURCC_FTYP = 0x66747970;
-const FOURCC_MOOV = 0x6d6f6f76;
-const FOURCC_MVHD = 0x6d766864;
-const FOURCC_TKHD = 0x746b6864;
-const FOURCC_MDHD = 0x6d646864;
-const FOURCC_UDTA = 0x75647461;
-const FOURCC_META = 0x6d657461;
-const FOURCC_ILST = 0x696c7374;
-const FOURCC_UUID = 0x75756964;
-const FOURCC_MDAT = 0x6d646174;
+export const FOURCC_FTYP = 0x66747970;
+export const FOURCC_MOOV = 0x6d6f6f76;
+export const FOURCC_MVHD = 0x6d766864;
+export const FOURCC_TKHD = 0x746b6864;
+export const FOURCC_MDHD = 0x6d646864;
+export const FOURCC_UDTA = 0x75647461;
+export const FOURCC_META = 0x6d657461;
+export const FOURCC_ILST = 0x696c7374;
+export const FOURCC_UUID = 0x75756964;
+export const FOURCC_MDAT = 0x6d646174;
+export const FOURCC_FREE = 0x66726565; // 'free' padding atom
 
-/**
- * Client-Side Video & Audio Anti-Forensic Sanitizer
- * Zero-copy block-level container decimation and metadata stripping.
- */
-export async function sanitizeMedia(
-  file: File | Blob,
-  options: MediaSanitizerOptions,
-  onProgress?: (percent: number) => void
-): Promise<SanitizedResult> {
-  onProgress?.(15);
-  const originalName = file instanceof File ? file.name : 'unnamed_media';
-  const auditBefore = await analyzeForensics(file, originalName);
-  onProgress?.(35);
-
-  const arrayBuffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuffer);
-
-  let cleanBytes: Uint8Array;
-  const mimeType = file.type || '';
-
-  if (isMp4OrMov(bytes)) {
-    cleanBytes = sanitizeMp4ContainerZeroCopy(bytes);
-  } else if (isAudioFile(mimeType, originalName)) {
-    cleanBytes = sanitizeAudioHeadersZeroCopy(bytes);
-  } else {
-    cleanBytes = bytes;
-  }
-  onProgress?.(75);
-
-  const cleanBlob = new Blob([cleanBytes as any], { type: mimeType || 'video/mp4' });
-  const ext = originalName.split('.').pop() || 'mp4';
-  const sanitizedName = await generateEphemeralSaltedName(cleanBytes, ext);
-  onProgress?.(90);
-
-  const auditAfter = await analyzeForensics(cleanBlob, sanitizedName);
-  onProgress?.(100);
-
-  return {
-    blob: cleanBlob,
-    originalBlob: file,
-    originalName,
-    sanitizedName,
-    originalSize: file.size,
-    sanitizedSize: cleanBlob.size,
-    format: mimeType,
-    sha256: auditAfter.sha256,
-    defenseLevel: options.defenseLevel,
-    auditBefore,
-    auditAfter,
-    processedAt: Date.now(),
-  };
-}
-
-function isMp4OrMov(bytes: Uint8Array): boolean {
+export function isMp4OrMov(bytes: Uint8Array): boolean {
   if (bytes.length < 12) return false;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const tag = view.getUint32(4, false);
   return tag === FOURCC_FTYP || tag === FOURCC_MOOV;
 }
 
-function isAudioFile(mimeType: string, name: string): boolean {
+export function isAudioFile(mimeType: string, name: string): boolean {
   return mimeType.startsWith('audio/') || /\.(mp3|wav|ogg|flac|aac|m4a)$/i.test(name);
 }
 
 /**
- * Zero-copy MP4 / MOV Container Sanitizer
+ * In-place mutation of ISOBMFF containers.
+ * Maintains original file size absolutely to preserve stco and co64 frame pointers.
+ * Overwrites target metadata atoms (udta, uuid, meta, ilst) with 'free' (0x66726565) and zeroes payload.
  */
-function sanitizeMp4ContainerZeroCopy(input: Uint8Array): Uint8Array {
+export function sanitizeMp4InPlaceZeroCopy(input: Uint8Array): Uint8Array {
   const output = new Uint8Array(input.length);
-  let writeOffset = 0;
-  let readOffset = 0;
-  const len = input.length;
-  const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
+  output.set(input);
+  const view = new DataView(output.buffer, output.byteOffset, output.byteLength);
 
-  while (readOffset + 8 <= len) {
-    const boxSize = view.getUint32(readOffset, false);
-    const boxType = view.getUint32(readOffset + 4, false);
-
-    let actualSize = boxSize;
-    let headerSize = 8;
-    if (boxSize === 0) {
-      actualSize = len - readOffset;
-    } else if (boxSize === 1) {
-      if (readOffset + 16 > len) break;
-      actualSize = Number(view.getBigUint64(readOffset + 8, false));
-      headerSize = 16;
-    }
-
-    if (actualSize < headerSize || readOffset + actualSize > len) break;
-
-    // Discard top-level metadata boxes
-    if (boxType === FOURCC_UDTA || boxType === FOURCC_META || boxType === FOURCC_UUID) {
-      readOffset += actualSize;
-      continue;
-    }
-
-    if (boxType === FOURCC_MOOV) {
-      const moovSlice = input.subarray(readOffset, readOffset + actualSize);
-      const cleanedMoov = sanitizeBoxRecursive(moovSlice);
-      output.set(cleanedMoov, writeOffset);
-      writeOffset += cleanedMoov.length;
-    } else if (boxType === FOURCC_MDAT) {
-      const mdatSlice = input.subarray(readOffset, readOffset + actualSize);
-      const cleanedMdat = sanitizeMdat(mdatSlice);
-      output.set(cleanedMdat, writeOffset);
-      writeOffset += cleanedMdat.length;
-    } else {
-      // Direct block copy
-      output.set(input.subarray(readOffset, readOffset + actualSize), writeOffset);
-      writeOffset += actualSize;
-    }
-
-    readOffset += actualSize;
-  }
-
-  return output.subarray(0, writeOffset);
+  sanitizeBoxListInPlace(output, view, 0, output.length);
+  return output;
 }
 
-/**
- * Recursively parses and sanitizes boxes (like moov, trak, mdia).
- */
-function sanitizeBoxRecursive(boxBytes: Uint8Array): Uint8Array {
-  const output = new Uint8Array(boxBytes.length);
-  let writeOffset = 8; // Box header
-  let readOffset = 8;
-  const len = boxBytes.length;
-  
-  const inView = new DataView(boxBytes.buffer, boxBytes.byteOffset, boxBytes.byteLength);
-  const outView = new DataView(output.buffer, output.byteOffset, output.byteLength);
+function sanitizeBoxListInPlace(
+  bytes: Uint8Array,
+  view: DataView,
+  start: number,
+  end: number
+): void {
+  let offset = start;
 
-  // Copy header
-  output.set(boxBytes.subarray(0, 8), 0);
-
-  while (readOffset + 8 <= len) {
-    const boxSize = inView.getUint32(readOffset, false);
-    const boxType = inView.getUint32(readOffset + 4, false);
+  while (offset + 8 <= end) {
+    const boxSize = view.getUint32(offset, false);
+    const boxType = view.getUint32(offset + 4, false);
 
     let actualSize = boxSize;
     let headerSize = 8;
+
     if (boxSize === 0) {
-      actualSize = len - readOffset;
+      actualSize = end - offset;
     } else if (boxSize === 1) {
-      if (readOffset + 16 > len) break;
-      actualSize = Number(inView.getBigUint64(readOffset + 8, false));
+      if (offset + 16 > end) break;
+      actualSize = Number(view.getBigUint64(offset + 8, false));
       headerSize = 16;
     }
 
-    if (actualSize < headerSize || readOffset + actualSize > len) break;
+    if (actualSize < headerSize || offset + actualSize > end) break;
 
-    // Discard metadata
-    if (boxType === FOURCC_UDTA || boxType === FOURCC_META || boxType === FOURCC_ILST || boxType === FOURCC_UUID) {
-      readOffset += actualSize;
+    // Target proprietary metadata blocks -> mutate in-place to 'free' and zero payload
+    const isMetadata =
+      boxType === FOURCC_UDTA ||
+      boxType === FOURCC_META ||
+      boxType === FOURCC_UUID ||
+      boxType === FOURCC_ILST;
+
+    if (isMetadata) {
+      view.setUint32(offset + 4, FOURCC_FREE, false);
+      bytes.fill(0, offset + headerSize, offset + actualSize);
+      offset += actualSize;
       continue;
     }
 
-    // Is it a container box?
-    const isContainer = boxType === 0x7472616b /* trak */ || 
-                        boxType === 0x6d646961 /* mdia */ ||
-                        boxType === 0x6d696e66 /* minf */ ||
-                        boxType === 0x7374626c /* stbl */ ||
-                        boxType === 0x64696e66 /* dinf */;
+    // Container boxes -> recurse inside
+    const isContainer =
+      boxType === FOURCC_MOOV ||
+      boxType === 0x7472616b /* trak */ ||
+      boxType === 0x6d646961 /* mdia */ ||
+      boxType === 0x6d696e66 /* minf */ ||
+      boxType === 0x7374626c /* stbl */ ||
+      boxType === 0x64696e66 /* dinf */;
 
     if (isContainer) {
-      const childSlice = boxBytes.subarray(readOffset, readOffset + actualSize);
-      const cleanedChild = sanitizeBoxRecursive(childSlice);
-      output.set(cleanedChild, writeOffset);
-      writeOffset += cleanedChild.length;
-    } else {
-      // Leaf box
-      const boxSub = boxBytes.subarray(readOffset, readOffset + actualSize);
-      output.set(boxSub, writeOffset);
-
-      // Normalize mvhd, tkhd, mdhd timestamps
-      if ((boxType === FOURCC_MVHD || boxType === FOURCC_TKHD || boxType === FOURCC_MDHD) && actualSize >= 28) {
-        const version = output[writeOffset + 8];
-        if (version === 0) {
-          outView.setUint32(writeOffset + 12, 0, false);
-          outView.setUint32(writeOffset + 16, 0, false);
-        } else if (version === 1 && actualSize >= 40) {
-          outView.setBigUint64(writeOffset + 12, 0n, false);
-          outView.setBigUint64(writeOffset + 20, 0n, false);
-        }
+      sanitizeBoxListInPlace(bytes, view, offset + headerSize, offset + actualSize);
+    } else if (boxType === FOURCC_MDAT) {
+      // In-place zeroing of encoder banners like 'x264 - core'
+      sanitizeMdatInPlace(bytes, offset + headerSize, offset + actualSize);
+    } else if (
+      (boxType === FOURCC_MVHD || boxType === FOURCC_TKHD || boxType === FOURCC_MDHD) &&
+      actualSize >= headerSize + 20
+    ) {
+      // Zero out creation and modification timestamps in-place
+      const version = bytes[offset + headerSize];
+      if (version === 0) {
+        view.setUint32(offset + headerSize + 4, 0, false);
+        view.setUint32(offset + headerSize + 8, 0, false);
+      } else if (version === 1 && actualSize >= headerSize + 28) {
+        view.setBigUint64(offset + headerSize + 4, 0n, false);
+        view.setBigUint64(offset + headerSize + 12, 0n, false);
       }
-      writeOffset += actualSize;
     }
 
-    readOffset += actualSize;
+    offset += actualSize;
   }
-
-  // Update total box size
-  outView.setUint32(0, writeOffset, false);
-  return output.subarray(0, writeOffset);
 }
 
-/**
- * Scans mdat for x264 SEI NAL units and overwrites them with zeros
- * to remove encoder banners without altering container offsets.
- */
-function sanitizeMdat(mdatBytes: Uint8Array): Uint8Array {
-  // We can't safely parse H264 NALs without stbl, but we can safely zero out 
-  // known text banners like 'x264 - core' inside the binary stream.
+function sanitizeMdatInPlace(bytes: Uint8Array, start: number, end: number): void {
   const banner = new TextEncoder().encode('x264 - core');
-  
-  for (let i = 8; i < mdatBytes.length - banner.length; i++) {
+  for (let i = start; i <= end - banner.length; i++) {
     let match = true;
     for (let j = 0; j < banner.length; j++) {
-      if (mdatBytes[i + j] !== banner[j]) {
+      if (bytes[i + j] !== banner[j]) {
         match = false;
         break;
       }
     }
     if (match) {
-      // Found the banner. Let's zero out a reasonable chunk around it
-      // typically an SEI message is a few hundred bytes at most.
-      // We will just zero out the next 256 bytes to destroy the string and config.
-      for (let k = 0; k < 256 && (i + k) < mdatBytes.length; k++) {
-        mdatBytes[i + k] = 0;
+      for (let k = 0; k < 256 && i + k < end; k++) {
+        bytes[i + k] = 0;
       }
     }
   }
-  return mdatBytes;
 }
 
 /**
  * Zero-copy ID3 header stripping
  */
-function sanitizeAudioHeadersZeroCopy(bytes: Uint8Array): Uint8Array {
+export function sanitizeAudioHeadersZeroCopy(bytes: Uint8Array): Uint8Array {
   let startOffset = 0;
   let endOffset = bytes.length;
 
@@ -265,4 +158,109 @@ function sanitizeAudioHeadersZeroCopy(bytes: Uint8Array): Uint8Array {
   }
 
   return bytes.subarray(startOffset, endOffset);
+}
+
+/**
+ * Offloads structural media processing to a Web Worker via Transferable Objects.
+ * Falls back to synchronous execution when Worker is undefined (Node.js test environment).
+ */
+export async function sanitizeMediaWithWorker(
+  buffer: ArrayBuffer,
+  mimeType: string,
+  originalName: string
+): Promise<Uint8Array> {
+  if (typeof Worker !== 'undefined') {
+    return new Promise<Uint8Array>((resolve, reject) => {
+      try {
+        const worker = new Worker(
+          new URL('../workers/media.worker.ts', import.meta.url),
+          { type: 'module' }
+        );
+
+        worker.onmessage = (e: MessageEvent<{ buffer: ArrayBuffer }>) => {
+          const result = new Uint8Array(e.data.buffer);
+          worker.terminate();
+          resolve(result);
+        };
+
+        worker.onerror = err => {
+          worker.terminate();
+          reject(err);
+        };
+
+        // Zero-copy transfer of input buffer to Worker
+        worker.postMessage({ buffer, mimeType, originalName }, [buffer]);
+      } catch {
+        const bytes = new Uint8Array(buffer);
+        const res = isMp4OrMov(bytes)
+          ? sanitizeMp4InPlaceZeroCopy(bytes)
+          : isAudioFile(mimeType, originalName)
+          ? sanitizeAudioHeadersZeroCopy(bytes)
+          : bytes;
+        resolve(res);
+      }
+    });
+  }
+
+  const bytes = new Uint8Array(buffer);
+  if (isMp4OrMov(bytes)) {
+    return sanitizeMp4InPlaceZeroCopy(bytes);
+  } else if (isAudioFile(mimeType, originalName)) {
+    return sanitizeAudioHeadersZeroCopy(bytes);
+  }
+  return bytes;
+}
+
+/**
+ * Client-Side Video & Audio Anti-Forensic Sanitizer
+ */
+export async function sanitizeMedia(
+  file: File | Blob,
+  options: MediaSanitizerOptions,
+  onProgress?: (percent: number) => void
+): Promise<SanitizedResult> {
+  onProgress?.(15);
+  const originalName = file instanceof File ? file.name : 'unnamed_media';
+  const auditBefore = await analyzeForensics(file, originalName);
+  onProgress?.(35);
+
+  let arrayBuffer: ArrayBuffer | null = await file.arrayBuffer();
+  const mimeType = file.type || '';
+
+  // Process via Web Worker with Transferable Objects
+  let cleanBytes: Uint8Array | null = await sanitizeMediaWithWorker(
+    arrayBuffer,
+    mimeType,
+    originalName
+  );
+  onProgress?.(75);
+
+  const cleanBlob = new Blob([cleanBytes as any], { type: mimeType || 'video/mp4' });
+  const ext = originalName.split('.').pop() || 'mp4';
+  const sanitizedName = await generateSanitizedName(cleanBytes, ext);
+  onProgress?.(90);
+
+  const auditAfter = await analyzeForensics(cleanBlob, sanitizedName);
+  onProgress?.(100);
+
+  const result: SanitizedResult = {
+    blob: cleanBlob,
+    originalBlob: file,
+    originalName,
+    sanitizedName,
+    originalSize: file.size,
+    sanitizedSize: cleanBlob.size,
+    format: mimeType,
+    sha256: auditAfter.sha256,
+    defenseLevel: options.defenseLevel,
+    auditBefore,
+    auditAfter,
+    processedAt: Date.now(),
+  };
+
+  // Aggressive memory hygiene: decouple buffers for GC
+  cleanBytes = null;
+  arrayBuffer = null;
+
+  return result;
 }

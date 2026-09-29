@@ -11,7 +11,7 @@ import { renderLegalModal } from './components/legal-modal';
 export class DoDecoderApp {
   private root: HTMLElement;
   private settings: SettingsState = {
-    quality: 0.85,
+    quality: 0.60,
     extremeSanitization: false,
   };
   private queue: QueueItem[] = [];

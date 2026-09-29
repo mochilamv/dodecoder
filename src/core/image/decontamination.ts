@@ -387,6 +387,71 @@ export function applyVisibilityDithering(
 }
 
 /**
+ * Step 4: Forced YUV 4:2:0 Chroma Subsampling
+ * Averages chroma (Cb, Cr) across 2x2 pixel blocks while preserving full-resolution Luma (Y),
+ * destroying color-channel anchored steganographic payloads and PRNU carrier patterns.
+ */
+export function applyYuv420ChromaSubsampling(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number
+): void {
+  for (let by = 0; by < height; by += 2) {
+    const hasNextRow = by + 1 < height;
+    for (let bx = 0; bx < width; bx += 2) {
+      const hasNextCol = bx + 1 < width;
+
+      // 2x2 block pixel coordinates
+      const coords: Array<[number, number]> = [[bx, by]];
+      if (hasNextCol) coords.push([bx + 1, by]);
+      if (hasNextRow) coords.push([bx, by + 1]);
+      if (hasNextRow && hasNextCol) coords.push([bx + 1, by + 1]);
+
+      let sumCb = 0;
+      let sumCr = 0;
+      const yValues: number[] = [];
+
+      for (const [x, y] of coords) {
+        const idx = (y * width + x) * 4;
+        const r = data[idx];
+        const g = data[idx + 1];
+        const b = data[idx + 2];
+
+        // Standard ITU-R BT.601 conversion
+        const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+        const cb = -0.168736 * r - 0.331264 * g + 0.5 * b + 128;
+        const cr = 0.5 * r - 0.418688 * g - 0.081312 * b + 128;
+
+        yValues.push(luma);
+        sumCb += cb;
+        sumCr += cr;
+      }
+
+      const avgCb = sumCb / coords.length;
+      const avgCr = sumCr / coords.length;
+
+      // Reconstruct RGB for each pixel using individual Luma and block-averaged Chroma
+      for (let i = 0; i < coords.length; i++) {
+        const [x, y] = coords[i];
+        const idx = (y * width + x) * 4;
+        const luma = yValues[i];
+
+        const cbShift = avgCb - 128;
+        const crShift = avgCr - 128;
+
+        const r = luma + 1.402 * crShift;
+        const g = luma - 0.344136 * cbShift - 0.714136 * crShift;
+        const b = luma + 1.772 * cbShift;
+
+        data[idx] = Math.min(255, Math.max(0, Math.round(r)));
+        data[idx + 1] = Math.min(255, Math.max(0, Math.round(g)));
+        data[idx + 2] = Math.min(255, Math.max(0, Math.round(b)));
+      }
+    }
+  }
+}
+
+/**
  * Executes the complete Deep Decontamination Pipeline on a canvas.
  */
 export function applyDeepDecontamination(
@@ -399,7 +464,7 @@ export function applyDeepDecontamination(
   // 2. Hardware-Accelerated 3x3 Median Filter
   applyMedianFilter3x3(canvas);
 
-  // 3. Visibility-Threshold Dithering
+  // 3. Visibility-Threshold Dithering & YUV 4:2:0 Chroma Subsampling
   const ctx = canvas.getContext('2d', { willReadFrequently: true }) as
     | CanvasRenderingContext2D
     | OffscreenCanvasRenderingContext2D
@@ -407,6 +472,7 @@ export function applyDeepDecontamination(
 
   if (ctx) {
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    applyYuv420ChromaSubsampling(imgData.data, canvas.width, canvas.height);
     applyVisibilityDithering(imgData.data);
     ctx.putImageData(imgData, 0, 0);
   }

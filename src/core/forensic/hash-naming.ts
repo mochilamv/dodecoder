@@ -24,46 +24,14 @@ export function sanitizeExtension(extension: string): string {
 }
 
 /**
- * Generates an anti-forensic sanitized filename using CSPRNG ephemeral salting.
+ * Generates an anti-forensic sanitized filename via pure SHA-256 hashing.
+ * Removes salt injection completely to guarantee idempotency and deduplication.
  *
  * @param buffer Sanitized file byte content
  * @param extension Target extension, e.g. 'webp', 'jpeg', 'mp4'
- * @param chars Number of hash characters to use, default 32 for 128 bits of entropy
+ * @param chars Number of hash characters to use, strictly 32 for 128 bits of entropy
  */
-export async function generateEphemeralSaltedName(
-  buffer: ArrayBuffer | Uint8Array,
-  extension: string,
-  chars: number = 32
-): Promise<string> {
-  const data = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  
-  // Allocate 32 bytes (256 bits) for CSPRNG salt
-  const salt = new Uint8Array(32);
-  crypto.getRandomValues(salt);
-
-  // Allocate combined buffer
-  const combined = new Uint8Array(salt.length + data.length);
-  combined.set(salt, 0);
-  combined.set(data, salt.length);
-
-  // Compute SHA-256
-  const hashBuffer = await crypto.subtle.digest('SHA-256', combined.buffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hexHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-  // Explicitly wipe the salt and the combined memory to prevent residual forensic extraction
-  salt.fill(0);
-  combined.fill(0);
-
-  const cleanExt = sanitizeExtension(extension);
-  const cleanHash = hexHash.slice(0, chars);
-  return `${cleanHash}.${cleanExt}`;
-}
-
-/**
- * Generates a deterministic sanitized filename based on direct 128-bit SHA-256 hash.
- */
-export async function generateDeterministicHashName(
+export async function generateSanitizedName(
   buffer: ArrayBuffer | Uint8Array,
   extension: string,
   chars: number = 32
@@ -73,6 +41,9 @@ export async function generateDeterministicHashName(
   const cleanExt = sanitizeExtension(extension);
   return `${cleanHash}.${cleanExt}`;
 }
+
+export const generateDeterministicHashName = generateSanitizedName;
+export const generateEphemeralSaltedName = generateSanitizedName;
 
 /**
  * Generates a CSPRNG-randomized filename using window.crypto.getRandomValues

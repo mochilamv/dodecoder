@@ -1,20 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateEphemeralSaltedName, generateRandomName } from '../src/core/forensic/hash-naming';
+import { generateSanitizedName, generateRandomName } from '../src/core/forensic/hash-naming';
 import { calculateAntiPrnuConfig } from '../src/core/image/prnu-defense';
 import { inspectBinaryMarkers } from '../src/core/forensic/marker-parser';
 import { createSanitizedZipBundle } from '../src/core/utils/zip-export';
 import { SanitizedResult } from '../src/core/types';
 
-test('1. Cryptographic Hashing and Ephemeral Salting', async () => {
+test('1. Pure SHA-256 Hashing and Deterministic Deduplication', async () => {
   const sampleData = new TextEncoder().encode('anti-forensic-pure-payload');
-  const hashedName1 = await generateEphemeralSaltedName(sampleData, '.JPEG', 16);
-  const hashedName2 = await generateEphemeralSaltedName(sampleData, '.JPEG', 16);
+  const hashedName1 = await generateSanitizedName(sampleData, '.JPEG');
+  const hashedName2 = await generateSanitizedName(sampleData, '.JPEG');
 
-  // Assert distinct names due to CSPRNG salting, despite same payload
-  assert.notEqual(hashedName1, hashedName2, 'CSPRNG salting must generate distinct hashes for same payloads');
-  assert.equal(hashedName1.length, 21); // 16 chars + .jpeg (5 chars)
+  // Assert idempotency: identical payloads yield identical hashes for deduplication
+  assert.equal(hashedName1, hashedName2, 'Pure SHA-256 must generate identical hashes for identical payloads');
+  assert.equal(hashedName1.length, 37); // 32 hex chars + .jpeg (5 chars)
   assert.ok(hashedName1.endsWith('.jpeg'));
+
+  const differentData = new TextEncoder().encode('different-payload');
+  const differentName = await generateSanitizedName(differentData, '.JPEG');
+  assert.notEqual(hashedName1, differentName, 'Different payloads must generate distinct hashes');
 
   const randomName = generateRandomName('webp', 8);
   assert.equal(randomName.length, 21);
@@ -87,22 +91,22 @@ test('4. Zero-Trace ZIP Bundle Timestamp Normalization', async () => {
   assert.equal(extraFieldLength, 0x0000, 'Extra field length must be exactly 0');
 });
 
-test('5. MP4 Recursive Box Stripping (mdhd zeroing) and mdat wipe', async () => {
+test('5. MP4 In-Place Mutation, Size Preservation, and Banner Zeroing', async () => {
   const syntheticMp4 = new Uint8Array([
     // ftyp (16 bytes)
     0x00, 0x00, 0x00, 0x10, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00,
-    // moov (72 bytes total)
-    0x00, 0x00, 0x00, 0x48, 0x6d, 0x6f, 0x6f, 0x76,
-    // trak (56 bytes)
-    0x00, 0x00, 0x00, 0x38, 0x74, 0x72, 0x61, 0x6b,
-    // mdia (48 bytes)
-    0x00, 0x00, 0x00, 0x30, 0x6d, 0x64, 0x69, 0x61,
+    // moov (64 bytes total: 8 header + 48 trak + 8 udta)
+    0x00, 0x00, 0x00, 0x40, 0x6d, 0x6f, 0x6f, 0x76,
+    // trak (48 bytes: 8 header + 40 mdia)
+    0x00, 0x00, 0x00, 0x30, 0x74, 0x72, 0x61, 0x6b,
+    // mdia (40 bytes: 8 header + 32 mdhd)
+    0x00, 0x00, 0x00, 0x28, 0x6d, 0x64, 0x69, 0x61,
     // mdhd (32 bytes) - inside mdia inside trak
     0x00, 0x00, 0x00, 0x20, 0x6d, 0x64, 0x68, 0x64, 0x00, 0x00, 0x00, 0x00,
     0x12, 0x34, 0x56, 0x78, // creation timestamp
     0x9a, 0xbc, 0xde, 0xf0, // modification timestamp
     0x00, 0x00, 0x03, 0xe8, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, 0x00, 0x00,
-    // udta (8 bytes) inside moov - to be stripped
+    // udta (8 bytes) inside moov - to be mutated in-place to 'free'
     0x00, 0x00, 0x00, 0x08, 0x75, 0x64, 0x74, 0x61,
     // mdat (24 bytes) - with banner
     0x00, 0x00, 0x00, 0x18, 0x6d, 0x64, 0x61, 0x74,
@@ -115,14 +119,18 @@ test('5. MP4 Recursive Box Stripping (mdhd zeroing) and mdat wipe', async () => 
 
   const cleanBuffer = await result.blob.arrayBuffer();
   const cleanBytes = new Uint8Array(cleanBuffer);
-  
-  // Check udta was removed
+
+  // Exact file size must be preserved to keep stco/co64 frame pointers valid
+  assert.equal(cleanBytes.length, syntheticMp4.length, 'Output size must strictly match input size');
+
+  // Check udta was mutated to free
   const hasUdta = cleanBytes.some((_, i) => i + 4 <= cleanBytes.length && cleanBytes[i]===0x75 && cleanBytes[i+1]===0x64 && cleanBytes[i+2]===0x74 && cleanBytes[i+3]===0x61);
-  assert.equal(hasUdta, false, 'udta box must not exist');
+  assert.equal(hasUdta, false, 'udta box FourCC must not exist');
+
+  const hasFree = cleanBytes.some((_, i) => i + 4 <= cleanBytes.length && cleanBytes[i]===0x66 && cleanBytes[i+1]===0x72 && cleanBytes[i+2]===0x65 && cleanBytes[i+3]===0x65);
+  assert.equal(hasFree, true, 'udta box must be mutated to free box in-place');
 
   // Check mdhd timestamps zeroed out
-  // The mdhd will be inside the rebuilt box structure.
-  // Search for 'mdhd' (0x6d646864)
   let mdhdOffset = -1;
   for (let i = 0; i < cleanBytes.length - 4; i++) {
     if (cleanBytes[i] === 0x6d && cleanBytes[i+1] === 0x64 && cleanBytes[i+2] === 0x68 && cleanBytes[i+3] === 0x64) {
@@ -134,7 +142,7 @@ test('5. MP4 Recursive Box Stripping (mdhd zeroing) and mdat wipe', async () => 
   const cleanView = new DataView(cleanBuffer);
   assert.equal(cleanView.getUint32(mdhdOffset + 12, false), 0, 'creation time zeroed');
   assert.equal(cleanView.getUint32(mdhdOffset + 16, false), 0, 'mod time zeroed');
-  
+
   // Check mdat banner was wiped
   const hasBanner = cleanBytes.some((_, i) => i + 11 <= cleanBytes.length && new TextDecoder().decode(cleanBytes.slice(i, i+11)) === 'x264 - core');
   assert.equal(hasBanner, false, 'x264 - core banner must be wiped');
@@ -337,7 +345,7 @@ test('9. Surgical Bloat Fallback: stripAllMetadataSurgical eliminates metadata a
 });
 
 test('10. 128-bit SHA-256 Naming and Chained Extension Sanitization', async () => {
-  const { sanitizeExtension, generateDeterministicHashName } = await import('../src/core/forensic/hash-naming');
+  const { sanitizeExtension, generateSanitizedName, generateDeterministicHashName, generateEphemeralSaltedName } = await import('../src/core/forensic/hash-naming');
 
   // Extension sanitization eliminates chained extensions
   assert.equal(sanitizeExtension('.jpg.webp'), 'webp');
@@ -348,11 +356,15 @@ test('10. 128-bit SHA-256 Naming and Chained Extension Sanitization', async () =
 
   const samplePayload = new TextEncoder().encode('anti-steganography-test-payload');
   
-  // Default ephemeral salted name produces 32 hex chars (128 bits of entropy)
-  const defaultSaltedName = await generateEphemeralSaltedName(samplePayload, '.jpg.webp');
-  const [saltedHash, saltedExt] = defaultSaltedName.split('.');
-  assert.equal(saltedHash.length, 32, 'Default hash length must be 32 hex chars (128 bits)');
-  assert.equal(saltedExt, 'webp', 'Chained extension must be reduced to final webp extension');
+  // Default sanitized name produces 32 hex chars (128 bits of entropy)
+  const defaultSanitizedName = await generateSanitizedName(samplePayload, '.jpg.webp');
+  const [sanitizedHash, sanitizedExt] = defaultSanitizedName.split('.');
+  assert.equal(sanitizedHash.length, 32, 'Default hash length must be 32 hex chars (128 bits)');
+  assert.equal(sanitizedExt, 'webp', 'Chained extension must be reduced to final webp extension');
+
+  // Compatibility alias also yields 32 hex chars
+  const saltedAliasName = await generateEphemeralSaltedName(samplePayload, '.jpg.webp');
+  assert.equal(saltedAliasName, defaultSanitizedName);
 
   // Deterministic 128-bit naming
   const detName = await generateDeterministicHashName(samplePayload, '.png.webp');
@@ -488,5 +500,30 @@ test('13. Enforced Lossy Quantization and Bypass Suppression under Extreme Sanit
   }
   assert.equal(effectiveMime, 'image/webp', 'Extreme Sanitization must enforce lossy VP8 container');
   assert.equal(effectiveQuality, 0.85, 'Extreme Sanitization must enforce lossy 85% quantization');
+});
+
+test('14. Forced YUV 4:2:0 Chroma Subsampling destroys color-channel steganographic modulation', async () => {
+  const { applyYuv420ChromaSubsampling } = await import('../src/core/image/decontamination');
+
+  // 2x2 raster:
+  // [0,0]: pure red (255, 0, 0, 255)
+  // [1,0]: pure blue (0, 0, 255, 255)
+  // [0,1]: pure green (0, 255, 0, 255)
+  // [1,1]: white (255, 255, 255, 255)
+  const raster = new Uint8ClampedArray([
+    255, 0, 0, 255,
+    0, 0, 255, 255,
+    0, 255, 0, 255,
+    255, 255, 255, 255,
+  ]);
+
+  applyYuv420ChromaSubsampling(raster, 2, 2);
+
+  // Assert chroma is averaged across the 2x2 block
+  assert.equal(raster.length, 16);
+  // Red pixel: should no longer be pure 0 in G and B channels due to block chroma averaging
+  assert.ok(raster[1] > 0 || raster[2] > 0, 'Chroma averaging must diffuse color channel values');
+  // Blue pixel: should no longer be pure 0 in R and G channels
+  assert.ok(raster[4] > 0 || raster[5] > 0, 'Chroma averaging must diffuse color channel values');
 });
 

@@ -18,24 +18,16 @@ export function renderSettingsPanel(
           <div class="flex items-center gap-2">
             <span class="text-xs font-mono font-semibold uppercase tracking-wider text-neutral-300">Encoder Quality</span>
             <span id="quality-val" class="text-xs font-mono font-bold text-white px-2 py-0.5 rounded bg-neutral-900 border border-neutral-800">
-              ${Math.round(state.quality * 100)}%
+              60%
+            </span>
+            <span class="text-[10px] text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-1.5 py-0.5 rounded font-mono font-normal">
+              OPSEC Enforced
             </span>
           </div>
         </div>
-        <input
-          id="quality-slider"
-          type="range"
-          min="60"
-          max="95"
-          step="1"
-          value="${Math.round(state.quality * 100)}"
-          class="w-full accent-neutral-200 cursor-pointer bg-neutral-900"
-        />
-        <div class="flex justify-between text-[10px] text-neutral-400 font-mono">
-          <span>60% Max Compression</span>
-          <span>85% Recommended</span>
-          <span>95% High Quality</span>
-        </div>
+        <p class="text-[11px] text-neutral-400">
+          Hardcoded strictly to 60% with YUV 4:2:0 Chroma Subsampling to neutralize PRNU and steganographic carriers.
+        </p>
       </div>
 
       <!-- Extreme Sanitization Toggle -->
@@ -67,15 +59,6 @@ export function renderSettingsPanel(
     </div>
   `;
 
-  const qualitySlider = panel.querySelector<HTMLInputElement>('#quality-slider');
-  const qualityVal = panel.querySelector<HTMLElement>('#quality-val');
-  if (qualitySlider && qualityVal) {
-    qualitySlider.addEventListener('input', () => {
-      const val = parseInt(qualitySlider.value, 10);
-      qualityVal.textContent = `${val}%`;
-      onChange({ quality: val / 100 });
-    });
-  }
 
   const extremeToggle = panel.querySelector<HTMLInputElement>('#extreme-toggle');
   if (extremeToggle) {
