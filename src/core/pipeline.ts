@@ -30,11 +30,10 @@ export async function processMediaFile(
   const isVideoOrAudio = mime.startsWith('video/') || mime.startsWith('audio/') || /\.(mp4|mov|mkv|webm|mp3|wav|ogg|aac|m4a)$/i.test(name);
 
   if (isImage) {
-    // Auto-detect optimal container: webp for modern high-efficiency, or match if png
-    const targetFormat: OutputFormat = options.outputFormat || (name.endsWith('.png') ? 'image/png' : 'image/webp');
+    // Re-encode strictly using VP8 or VP8L WebP container
     return await sanitizeImage(file, {
       defenseLevel,
-      outputFormat: targetFormat,
+      outputFormat: 'image/webp',
       quality,
       extremeSanitization,
     }, onProgress);

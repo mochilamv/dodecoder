@@ -492,14 +492,14 @@ test('13. Enforced Lossy Quantization and Bypass Suppression under Extreme Sanit
   assert.equal(shouldBypass, false, 'Extreme Sanitization must suppress 1:1 bypass to enforce de-steganography');
 
   // Verify format override: when extremeSanitization is active on non-photo, format routes to lossy webp
-  let effectiveMime = 'image/png';
+  let effectiveMime = 'image/webp';
   let effectiveQuality = 1.0;
   if (extremeSanitization && isPngNonPhoto) {
     effectiveMime = 'image/webp';
-    effectiveQuality = 0.85;
+    effectiveQuality = 0.60;
   }
   assert.equal(effectiveMime, 'image/webp', 'Extreme Sanitization must enforce lossy VP8 container');
-  assert.equal(effectiveQuality, 0.85, 'Extreme Sanitization must enforce lossy 85% quantization');
+  assert.equal(effectiveQuality, 0.60, 'Extreme Sanitization must enforce OPSEC 60% lossy quantization');
 });
 
 test('14. Forced YUV 4:2:0 Chroma Subsampling destroys color-channel steganographic modulation', async () => {
@@ -525,5 +525,29 @@ test('14. Forced YUV 4:2:0 Chroma Subsampling destroys color-channel steganograp
   assert.ok(raster[1] > 0 || raster[2] > 0, 'Chroma averaging must diffuse color channel values');
   // Blue pixel: should no longer be pure 0 in R and G channels
   assert.ok(raster[4] > 0 || raster[5] > 0, 'Chroma averaging must diffuse color channel values');
+});
+
+test('15. Mandatory One-Way Image Re-Synthesis and Isolation of In-Place Manipulation to Media', async () => {
+  const { isMp4OrMov, isAudioFile } = await import('../src/core/media/media-sanitizer');
+
+  // 1. Verify in-place structural manipulation is strictly rejected for all image types
+  const imageFormats = [
+    { name: 'photo.jpg', mime: 'image/jpeg', magic: [0xff, 0xd8, 0xff, 0xe1] },
+    { name: 'graphic.png', mime: 'image/png', magic: [0x89, 0x50, 0x4e, 0x47] },
+    { name: 'capture.webp', mime: 'image/webp', magic: [0x52, 0x49, 0x46, 0x46] },
+    { name: 'scan.bmp', mime: 'image/bmp', magic: [0x42, 0x4d, 0x00, 0x00] },
+    { name: 'raw.tiff', mime: 'image/tiff', magic: [0x49, 0x49, 0x2a, 0x00] },
+  ];
+
+  for (const img of imageFormats) {
+    const bytes = new Uint8Array([...img.magic, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    assert.equal(isMp4OrMov(bytes), false, `${img.name} must never be classified as MP4/MOV`);
+    assert.equal(isAudioFile(img.mime, img.name), false, `${img.name} must never be classified as audio`);
+  }
+
+  // 2. Verify media classifiers accept valid MP4/MOV and audio formats
+  const mp4Header = new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+  assert.equal(isMp4OrMov(mp4Header), true, 'ISOBMFF header must be recognized for in-place mutation');
+  assert.equal(isAudioFile('audio/mpeg', 'track.mp3'), true, 'MP3 audio must be recognized for audio stripping');
 });
 

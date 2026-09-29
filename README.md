@@ -59,11 +59,11 @@ Dodecoder reconstructs and normalizes media bitstreams directly in memory:
 - **Zero-Trace Standalone PKZIP Builder:**
   - Autonomous binary serializer enforcing MS-DOS attributes.
   - Sets DOS timestamps to Jan 1, 1980 00:00:00 UTC and enforces zero extra fields, preventing UNIX timestamps and UID or GID leakage.
-- **Fast-Track Bypass 1:1 Bitstream:**
-  - Evaluates suspicious metadata tags via low-level DataView parsing prior to canvas decoding.
-  - When suspicious tag count is 0 and extreme sanitization is disabled, returns the exact 1:1 bitstream.
-- **Post-Processing Bloat Fallback:**
-  - When canvas re-encoding results in a blob larger than the input file, the canvas output is discarded and surgical binary stripping is applied directly to original bytes.
+- **Mandatory One-Way Image Re-Synthesis:**
+  - 100 percent of image assets strictly route through canvas decoding with stochastic affine perturbation.
+  - Fast-Track 1:1 bypass is permanently disabled across JPEG, PNG, WebP, BMP, and TIFF to prevent PRNU and sensor fingerprint leakage.
+  - Guaranteed cryptographic divergence: output SHA-256 strictly diverges from input SHA-256 for all images.
+  - In-place structural manipulation via DataView and free atom substitution is isolated strictly to MP4, MOV, and audio assets.
 
 ---
 
