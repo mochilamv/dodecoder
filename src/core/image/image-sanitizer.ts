@@ -4,7 +4,7 @@ import { generateSanitizedName } from '../forensic/hash-naming';
 import { applyPrnuDefense } from './prnu-defense';
 import { stripDisplayColorProfiles } from './icc-sanitizer';
 import { applyDeepDecontamination, applyYuv420ChromaSubsampling } from './decontamination';
-import ImageWorker from '../workers/image.worker.ts?worker';
+
 
 export interface ImageSanitizerOptions {
   defenseLevel: DefenseLevel;
@@ -37,7 +37,10 @@ export async function sanitizeImage(
   try {
     // Attempt dedicated Web Worker pipeline
     cleanBytes = await new Promise<Uint8Array>((resolve, reject) => {
-      const worker = new ImageWorker();
+      const worker = new Worker(
+        new URL('../workers/image.worker.ts', import.meta.url),
+        { type: 'module' }
+      );
       worker.onmessage = (e) => {
         if (e.data.error) reject(new Error(e.data.error));
         else resolve(new Uint8Array(e.data.buffer));
