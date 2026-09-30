@@ -3,17 +3,32 @@
 @layer base {
   :root {
     --bg-black: #000000;
-    --card-surface: #0a0a0a;
-    --card-border: rgba(255, 255, 255, 0.1);
+    --text-white: #FFFFFF;
+    --text-success: #00FF00;
+    --text-alert: #FF4444;
   }
 
   body {
     background-color: #000000;
-    color: #e5e5e5;
+    color: #FFFFFF;
+    margin: 0;
+    padding: 0;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  * {
+    border-color: #000000 !important;
+    box-shadow: none !important;
+    background-image: none !important; /* Prohibit gradients */
+  }
+
+  *:focus-visible {
+    outline: 2px solid #00FF00 !important;
+    outline-offset: 2px;
   }
 }
 
-/* Custom scrollbar for deep black aesthetics */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -22,9 +37,8 @@
   background: #000000;
 }
 ::-webkit-scrollbar-thumb {
-  background: #262626;
-  border-radius: 3px;
+  background: #FFFFFF;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #404040;
+  background: #00FF00;
 }

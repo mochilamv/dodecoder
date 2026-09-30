@@ -27,21 +27,17 @@ export class DoDecoderApp {
   public render(): void {
     this.root.innerHTML = '';
 
-    // Main Container (clean top, no header clutter)
     const main = document.createElement('main');
-    main.className = 'flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-10 flex flex-col';
+    main.className = 'flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-10 flex flex-col gap-6';
 
-    // 1. Settings (Encoder Quality)
     const settingsPanel = renderSettingsPanel(this.settings, updated => {
       this.settings = { ...this.settings, ...updated };
     });
     main.appendChild(settingsPanel);
 
-    // 2. Dropzone (Batch processing)
     const dropzone = renderDropzone(files => this.handleFilesAdded(files));
     main.appendChild(dropzone);
 
-    // 3. Queue / Results List
     const queueList = renderQueueList(this.queue, {
       onDownloadSingle: item => this.handleDownloadSingle(item),
       onDownloadAllZip: () => this.handleDownloadAllZip(),
@@ -50,7 +46,6 @@ export class DoDecoderApp {
     });
     main.appendChild(queueList);
 
-    // 4. Footer (Features Dodecoder title at the bottom)
     const footer = this.createFooter();
     main.appendChild(footer);
 
@@ -59,18 +54,17 @@ export class DoDecoderApp {
 
   private createFooter(): HTMLElement {
     const footer = document.createElement('footer');
-    footer.className = 'mt-auto pt-16 pb-8 text-center text-neutral-500 text-xs font-mono border-t border-neutral-900';
+    footer.className = 'mt-auto pt-16 pb-8 text-center text-[#FFFFFF] text-xs font-mono';
     footer.innerHTML = `
       <div class="mb-3 space-y-1">
-        <div class="text-sm font-bold tracking-widest uppercase text-white font-mono">Dodecoder</div>
-        <div class="text-[11px] text-neutral-500">Client-Side Media Sanitization & Anti-Forensics</div>
+        <div class="text-sm font-bold tracking-widest uppercase text-[#FFFFFF] font-mono" title="Client-Side Media Sanitization & Anti-Forensics">Dodecoder</div>
       </div>
-      <div class="flex flex-wrap items-center justify-center gap-3 text-[11px] text-neutral-400">
+      <div class="flex flex-wrap items-center justify-center gap-3 text-[11px] text-[#FFFFFF]">
         <span>By Mochilamv & Antigravity (AI)</span>
         <span>•</span>
         <span>MIT License</span>
         <span>•</span>
-        <button id="footer-legal-btn" class="text-neutral-400 hover:text-white underline cursor-pointer">
+        <button id="footer-legal-btn" class="text-[#FFFFFF] hover:text-[#00FF00] cursor-pointer focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2">
           Licenses & Legal
         </button>
       </div>

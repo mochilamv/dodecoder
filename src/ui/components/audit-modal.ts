@@ -1,246 +1,90 @@
 import { SanitizedResult } from '../../core/types';
-import { revokeUrls } from '../../core/utils/memory';
 import { icons } from '../icons';
 
 export function renderAuditModal(result: SanitizedResult, onClose: () => void): HTMLElement {
-  const modal = document.createElement('div');
-  modal.className =
-    'fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md overflow-y-auto animate-fade-in';
+  const overlay = document.createElement('div');
+  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#000000]/90 backdrop-blur-sm';
 
-  const origPreview = URL.createObjectURL(result.originalBlob || result.blob);
-  const cleanPreview = URL.createObjectURL(result.blob);
+  const modal = document.createElement('div');
+  modal.className = 'w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-[#000000] text-[#FFFFFF] p-6 focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2';
+  modal.setAttribute('tabindex', '-1');
+
+  const before = result.auditBefore;
+  const after = result.auditAfter;
 
   modal.innerHTML = `
-    <div class="relative w-full max-w-5xl bg-[#080808] border border-neutral-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-      <!-- Header -->
-      <div class="flex items-center justify-between px-6 py-4 border-b border-neutral-800 bg-neutral-950">
-        <div>
-          <h2 class="text-sm font-bold font-mono text-white tracking-wide">File Inspection</h2>
-          <p class="text-[11px] text-neutral-400 font-mono">Comparison between raw input and sanitized output</p>
-        </div>
+    <div class="flex items-center justify-between mb-6">
+      <h2 class="text-lg font-mono font-bold tracking-wider text-[#FFFFFF]">Forensic Audit Report</h2>
+      <button id="btn-close-modal" class="p-2 text-[#FFFFFF] hover:text-[#FF4444] transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2" aria-label="Close modal">
+        ${icons.close}
+      </button>
+    </div>
 
-        <button id="modal-close" class="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors cursor-pointer">
-          ${icons.close}
-        </button>
+    <div class="space-y-8">
+      <!-- Overview -->
+      <div class="grid grid-cols-2 gap-4">
+        <div class="space-y-1">
+          <div class="text-[10px] text-[#FFFFFF] font-mono uppercase">Original</div>
+          <div class="text-sm font-mono text-[#FFFFFF] truncate" title="${result.originalName}">${result.originalName}</div>
+          <div class="text-xs text-[#FF4444] font-mono">${formatBytes(result.originalSize)}</div>
+          <div class="text-[10px] text-[#FF4444] font-mono break-all mt-1" title="Original SHA-256">${before.sha256}</div>
+        </div>
+        <div class="space-y-1">
+          <div class="text-[10px] text-[#FFFFFF] font-mono uppercase">Sanitized</div>
+          <div class="text-sm font-mono text-[#00FF00] truncate" title="${result.sanitizedName}">${result.sanitizedName}</div>
+          <div class="text-xs text-[#00FF00] font-mono">${formatBytes(result.sanitizedSize)}</div>
+          <div class="text-[10px] text-[#00FF00] font-mono break-all mt-1" title="Sanitized SHA-256">${after.sha256}</div>
+        </div>
       </div>
 
-      <!-- Scrollable Audit Body -->
-      <div class="p-6 overflow-y-auto space-y-6 text-neutral-300">
-        <!-- Visual & Hash Comparison Cards -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <!-- ORIGINAL -->
-          <div class="border border-red-900/40 bg-[#0c0909] rounded-xl p-4 space-y-3">
-            <div class="flex items-center justify-between border-b border-red-950 pb-2">
-              <span class="text-xs font-mono font-semibold text-red-400 uppercase flex items-center gap-1.5">
-                ${icons.alertTriangle} Input File
-              </span>
-              <span class="text-[10px] font-mono text-neutral-400 truncate max-w-[200px]">${result.originalName}</span>
-            </div>
-
-            <div class="aspect-video bg-black rounded-lg border border-neutral-900 overflow-hidden flex items-center justify-center relative">
-              ${renderMediaPreview(origPreview, result.originalName)}
-              <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-red-500/50 text-[10px] font-mono text-red-400">
-                ${result.auditBefore.tags.length} Metadata Tags Detected
-              </div>
-            </div>
-
-            <div class="space-y-1 font-mono text-[11px]">
-              <div class="flex justify-between text-neutral-400">
-                <span>File Size:</span>
-                <span class="text-white">${formatBytes(result.originalSize)}</span>
-              </div>
-              <div class="text-neutral-400">
-                <span>Input SHA-256:</span>
-                <div class="text-[10px] text-neutral-500 break-all">${result.auditBefore.sha256}</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- SANITIZED -->
-          <div class="border border-emerald-900/40 bg-[#070c09] rounded-xl p-4 space-y-3">
-            <div class="flex items-center justify-between border-b border-emerald-950 pb-2">
-              <span class="text-xs font-mono font-semibold text-emerald-400 uppercase flex items-center gap-1.5">
-                ${icons.shieldCheck} Clean File
-              </span>
-              <span class="text-[10px] font-mono text-emerald-300 truncate max-w-[200px]">${result.sanitizedName}</span>
-            </div>
-
-            <div class="aspect-video bg-black rounded-lg border border-neutral-900 overflow-hidden flex items-center justify-center relative">
-              ${renderMediaPreview(cleanPreview, result.sanitizedName)}
-              <div class="absolute bottom-2 left-2 px-2 py-0.5 rounded bg-black/80 border border-emerald-500/40 text-[10px] font-mono text-emerald-400 flex items-center gap-1">
-                ${icons.check} 0 Metadata Tags • Pure Bitstream
-              </div>
-            </div>
-
-            <div class="space-y-1 font-mono text-[11px]">
-              <div class="flex justify-between text-neutral-400">
-                <span>Clean Size:</span>
-                <span class="text-emerald-400 font-semibold">${formatBytes(result.sanitizedSize)}</span>
-              </div>
-              <div class="text-neutral-400">
-                <span>Output SHA-256:</span>
-                <div class="text-[10px] text-emerald-400/80 break-all">${result.sha256}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        ${
-          result.isDeepDecontaminated
-            ? `
-          <div class="p-3 rounded-xl border border-purple-500/50 bg-purple-950/30 text-purple-300 text-xs font-mono flex items-center gap-2.5">
-            <span class="text-purple-400 shrink-0">${icons.shield}</span>
-            <span><strong>Anti-Steganography Pipeline:</strong> Spatial micro-resampling, hardware-accelerated 3x3 median filtering, visibility dithering, and lossy VP8 quantization applied to destroy steganographic watermarks and tracking signals.</span>
-          </div>
-        `
-            : ''
-        }
-
-        <!-- Metadata Tag Inspection -->
-        <div class="border border-neutral-800 rounded-xl bg-neutral-950 p-4 space-y-3">
-          <div class="flex items-center justify-between border-b border-neutral-800 pb-2">
-            <h3 class="text-xs font-mono font-semibold text-neutral-200 uppercase tracking-wider">
-              Detected Metadata
-            </h3>
-            <span class="text-[10px] font-mono text-neutral-400">
-              Input: <strong class="text-red-400">${result.auditBefore.tags.length}</strong> tags | Output: <strong class="text-emerald-400">0</strong> tags
-            </span>
-          </div>
-
-          ${
-            result.auditBefore.tags.length > 0
-              ? `
-            <div class="overflow-x-auto">
-              <table class="w-full text-left font-mono text-xs">
-                <thead>
-                  <tr class="border-b border-neutral-800 text-neutral-500 text-[10px]">
-                    <th class="py-1.5 px-2">Type</th>
-                    <th class="py-1.5 px-2">Tag</th>
-                    <th class="py-1.5 px-2">Value</th>
-                    <th class="py-1.5 px-2">Severity</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-neutral-900">
-                  ${result.auditBefore.tags
-                    .map(
-                      tag => `
-                    <tr class="hover:bg-neutral-900/50">
-                      <td class="py-2 px-2 text-neutral-400 text-[11px]">${tag.category}</td>
-                      <td class="py-2 px-2 text-white font-medium">${tag.name}</td>
-                      <td class="py-2 px-2 text-neutral-300 max-w-xs truncate" title="${tag.value}">${tag.value}</td>
-                      <td class="py-2 px-2">
-                        <span class="px-1.5 py-0.5 rounded text-[9px] uppercase ${
-                          tag.severity === 'critical'
-                            ? 'bg-red-950 text-red-400 border border-red-900'
-                            : 'bg-neutral-900 text-neutral-300 border border-neutral-800'
-                        }">
-                          ${tag.severity}
-                        </span>
-                      </td>
-                    </tr>
-                  `
-                    )
-                    .join('')}
-                </tbody>
-              </table>
-            </div>
-          `
-              : `
-            <div class="p-3 text-center text-xs text-neutral-500 font-mono">
-              No embedded tags found in input file.
-            </div>
-          `
-          }
-        </div>
-
-        <!-- Binary Marker Breakdown -->
-        <div class="border border-neutral-800 rounded-xl bg-neutral-950 p-4 space-y-3">
-          <div class="flex items-center justify-between border-b border-neutral-800 pb-2">
-            <h3 class="text-xs font-mono font-semibold text-neutral-200 uppercase tracking-wider">
-              Container Segments
-            </h3>
-            <span class="text-[10px] font-mono text-emerald-400">All vendor markers eliminated</span>
-          </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <!-- Source Markers -->
-            <div>
-              <div class="text-[11px] font-mono text-neutral-400 mb-2 font-medium">Input Segments:</div>
-              <div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                ${result.auditBefore.markers
-                  .map(
-                    m => `
-                  <div class="flex items-center justify-between p-2 rounded bg-black border ${
-                    m.isSanitizedSafe ? 'border-neutral-800' : 'border-red-900/50 bg-red-950/20'
-                  } text-[11px] font-mono">
-                    <span class="${m.isSanitizedSafe ? 'text-neutral-300' : 'text-red-400 font-medium'}">${m.name}</span>
-                    <span class="text-[10px] text-neutral-500">${m.marker}</span>
-                  </div>
-                `
-                  )
-                  .join('')}
-              </div>
-            </div>
-
-            <!-- Sanitized Markers -->
-            <div>
-              <div class="text-[11px] font-mono text-neutral-400 mb-2 font-medium">Clean Segments:</div>
-              <div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                ${result.auditAfter.markers
-                  .map(
-                    m => `
-                  <div class="flex items-center justify-between p-2 rounded bg-black border border-emerald-900/40 text-[11px] font-mono">
-                    <span class="text-emerald-400">${m.name}</span>
-                    <span class="text-[10px] text-emerald-600">${m.marker}</span>
-                  </div>
-                `
-                  )
-                  .join('')}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Defense Summary -->
-        <div class="p-3.5 rounded-xl border border-neutral-800 bg-black flex items-center justify-between text-xs font-mono">
-          <div class="flex items-center gap-2 text-neutral-300">
-            ${icons.shieldCheck}
-            <span>Full Reconstruction & Noise Disruption Applied</span>
-          </div>
-          <span class="text-[11px] text-neutral-500">In-Memory • No Server Upload</span>
+      <!-- Payload Diff -->
+      <div class="space-y-4">
+        <h3 class="text-xs font-mono font-bold tracking-widest text-[#FFFFFF] uppercase">Vector Analysis</h3>
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          ${renderMetric('Format / MIME', before.mimeType, after.mimeType)}
+          ${renderMetric('EXIF / TIFF', before.hasExif ? 'Detected' : 'Clean', after.hasExif ? 'Detected' : 'Clean')}
+          ${renderMetric('GPS Coordinates', before.hasGps ? 'Exposed' : 'Clean', after.hasGps ? 'Exposed' : 'Clean')}
+          ${renderMetric('MakerNotes / OEM', before.hasMakerNotes ? 'Exposed' : 'Clean', after.hasMakerNotes ? 'Exposed' : 'Clean')}
+          ${renderMetric('Thumbnail Leak', before.hasThumbnail ? 'Exposed' : 'Clean', after.hasThumbnail ? 'Exposed' : 'Clean')}
+          ${renderMetric('Steganography Deep Decon', 'N/A', !!result.isDeepDecontaminated ? 'Applied' : 'Skipped')}
         </div>
       </div>
     </div>
   `;
 
-  const closeHandler = () => {
-    revokeUrls([origPreview, cleanPreview]);
-    onClose();
-  };
+  const closeBtn = modal.querySelector('#btn-close-modal');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', onClose);
+  }
 
-  modal.querySelector('#modal-close')?.addEventListener('click', closeHandler);
-  modal.addEventListener('click', e => {
-    if (e.target === modal) closeHandler();
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) onClose();
   });
 
-  return modal;
+  overlay.appendChild(modal);
+
+  // Auto-focus modal for accessibility
+  setTimeout(() => modal.focus(), 10);
+
+  return overlay;
 }
 
-function renderMediaPreview(url: string, fileName: string): string {
-  const isVideo = /\.(mp4|mov|webm)$/i.test(fileName);
-  const isAudio = /\.(mp3|wav|ogg|aac|m4a)$/i.test(fileName);
+function renderMetric(label: string, beforeVal: string, afterVal: string): string {
+  const isAfterClean = afterVal === 'Clean' || afterVal === 'Applied';
+  const afterColor = isAfterClean ? 'text-[#00FF00]' : 'text-[#FFFFFF]';
+  const beforeColor = (beforeVal !== 'Clean' && beforeVal !== 'N/A') ? 'text-[#FF4444]' : 'text-[#FFFFFF]';
 
-  if (isVideo) {
-    return `<video src="${url}" controls class="max-h-full max-w-full rounded"></video>`;
-  }
-  if (isAudio) {
-    return `
-      <div class="p-4 flex flex-col items-center justify-center text-center space-y-2 w-full">
-        <span class="text-neutral-400 font-mono text-[11px]">Audio Stream</span>
-        <audio src="${url}" controls class="w-full max-w-xs"></audio>
-      </div>`;
-  }
-  return `<img src="${url}" alt="Preview" class="max-h-full max-w-full object-contain" />`;
+  return `
+    <div class="flex flex-col space-y-1">
+      <div class="text-[10px] text-[#FFFFFF] font-mono tracking-wider uppercase">${label}</div>
+      <div class="flex items-center gap-2 text-xs font-mono">
+        <span class="${beforeColor}">${beforeVal}</span>
+        <span class="text-[#FFFFFF]">-&gt;</span>
+        <span class="${afterColor} font-bold">${afterVal}</span>
+      </div>
+    </div>
+  `;
 }
 
 function formatBytes(bytes: number): string {

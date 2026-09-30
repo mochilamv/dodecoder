@@ -24,10 +24,10 @@ export function renderQueueList(
 
   container.innerHTML = `
     <!-- Batch Actions Bar -->
-    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-[#080808] border border-neutral-800">
+    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5">
       <div class="flex items-center gap-2">
-        <span class="w-2.5 h-2.5 rounded-full ${completedCount === totalCount ? 'bg-emerald-400' : 'bg-neutral-400 animate-pulse'}"></span>
-        <span class="text-xs font-mono font-medium text-neutral-300">
+        <span class="w-2.5 h-2.5 ${completedCount === totalCount ? 'bg-[#00FF00]' : 'bg-[#FFFFFF] animate-pulse'}"></span>
+        <span class="text-xs font-mono font-medium text-[#FFFFFF]">
           Queue: ${completedCount} of ${totalCount} processed
         </span>
       </div>
@@ -36,7 +36,7 @@ export function renderQueueList(
         ${
           completedCount > 0
             ? `
-          <button id="btn-download-zip" class="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-black font-semibold text-xs font-mono transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+          <button id="btn-download-zip" class="flex-1 sm:flex-initial px-3.5 py-1.5 text-[#00FF00] hover:text-[#FFFFFF] font-semibold text-xs font-mono transition-colors flex items-center justify-center gap-1.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2">
             ${icons.archive}
             <span>Download All (ZIP)</span>
           </button>
@@ -44,7 +44,7 @@ export function renderQueueList(
             : ''
         }
 
-        <button id="btn-clear-all" class="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-400 hover:text-red-400 text-xs font-mono transition-colors flex items-center justify-center gap-1.5 cursor-pointer">
+        <button id="btn-clear-all" class="px-3 py-1.5 text-[#FFFFFF] hover:text-[#FF4444] text-xs font-mono transition-colors flex items-center justify-center gap-1.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2">
           ${icons.trash}
           <span>Clear</span>
         </button>
@@ -52,7 +52,7 @@ export function renderQueueList(
     </div>
 
     <!-- Items List -->
-    <div class="space-y-3" id="queue-items-container"></div>
+    <div class="space-y-6" id="queue-items-container"></div>
   `;
 
   // Hook batch events
@@ -70,8 +70,11 @@ export function renderQueueList(
 
   items.forEach(item => {
     const itemEl = document.createElement('div');
-    itemEl.className =
-      'p-4 rounded-xl border border-neutral-900 bg-black hover:border-neutral-800 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4';
+    itemEl.className = 'py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#FFFFFF]';
+    // Actually the rule says "Remove border, box-shadow...". 
+    // Wait, the rule says "Remove border, box-shadow, and contrasting background colors from main containers, dropzones, and card components."
+    // Let's remove border entirely and just use padding/margin.
+    itemEl.className = 'py-4 flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4';
 
     const isDone = item.status === 'done';
     const isError = item.status === 'error';
@@ -80,24 +83,24 @@ export function renderQueueList(
     const threatBadges: string[] = [];
     if (item.result?.auditBefore) {
       const b = item.result.auditBefore;
-      if (b.hasGps) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-red-950/80 border border-red-500/50 text-red-400">GPS EXPOSED</span>`);
-      if (b.hasThumbnail) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-red-950/80 border border-red-500/50 text-red-400">THUMBNAIL LEAK</span>`);
-      if (b.hasMakerNotes) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-red-950/80 border border-red-500/50 text-red-400">MAKERNOTES</span>`);
-      if (b.hasExif && !b.hasGps) threatBadges.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-neutral-900 border border-neutral-800 text-neutral-300">EXIF</span>`);
+      if (b.hasGps) threatBadges.push(`<span class="px-1.5 py-0.5 text-[10px] font-mono text-[#FF4444]">GPS EXPOSED</span>`);
+      if (b.hasThumbnail) threatBadges.push(`<span class="px-1.5 py-0.5 text-[10px] font-mono text-[#FF4444]">THUMBNAIL LEAK</span>`);
+      if (b.hasMakerNotes) threatBadges.push(`<span class="px-1.5 py-0.5 text-[10px] font-mono text-[#FF4444]">MAKERNOTES</span>`);
+      if (b.hasExif && !b.hasGps) threatBadges.push(`<span class="px-1.5 py-0.5 text-[10px] font-mono text-[#FFFFFF]">EXIF</span>`);
     }
 
     itemEl.innerHTML = `
       <div class="flex items-start gap-3 min-w-0 flex-1">
-        <div class="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center shrink-0 mt-0.5 text-neutral-400">
-          ${isDone ? `<span class="text-emerald-400">${icons.check}</span>` : isError ? `<span class="text-red-400">${icons.alertTriangle}</span>` : `<span class="text-neutral-400 animate-spin">${icons.cpu}</span>`}
+        <div class="w-8 h-8 flex items-center justify-center shrink-0 mt-0.5 text-[#FFFFFF]">
+          ${isDone ? `<span class="text-[#00FF00]">${icons.check}</span>` : isError ? `<span class="text-[#FF4444]">${icons.alertTriangle}</span>` : `<span class="text-[#FFFFFF] animate-spin">${icons.cpu}</span>`}
         </div>
 
         <div class="min-w-0 flex-1 space-y-1">
           <div class="flex flex-wrap items-center gap-2">
-            <span class="text-xs font-mono font-medium text-neutral-200 truncate max-w-[200px] sm:max-w-xs" title="${item.file.name}">
+            <span class="text-xs font-mono font-medium text-[#FFFFFF] truncate max-w-[200px] sm:max-w-xs" title="${item.file.name}">
               ${item.file.name}
             </span>
-            <span class="text-[10px] text-neutral-400 font-mono">(${formatBytes(item.file.size)})</span>
+            <span class="text-[10px] text-[#FFFFFF] font-mono">(${formatBytes(item.file.size)})</span>
             ${threatBadges.join(' ')}
           </div>
 
@@ -105,19 +108,19 @@ export function renderQueueList(
             isDone && item.result
               ? `
             <div class="flex flex-wrap items-center gap-2 pt-0.5">
-              <span class="text-xs font-mono text-emerald-400 font-medium">
+              <span class="text-xs font-mono text-[#00FF00] font-medium">
                 ${item.result.sanitizedName}
               </span>
-              <span class="text-[10px] text-neutral-400 font-mono">
+              <span class="text-[10px] text-[#FFFFFF] font-mono">
                 (${formatBytes(item.result.sanitizedSize)})
               </span>
-              <span class="text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-950/20 text-emerald-400 font-mono">
+              <span class="text-[10px] px-1.5 py-0.5 text-[#00FF00] font-mono">
                 CLEAN
               </span>
               ${
                 item.result.isDeepDecontaminated
                   ? `
-                <span class="text-[10px] px-1.5 py-0.5 rounded border border-purple-500/50 bg-purple-950/40 text-purple-300 font-mono" title="Anti-steganography pipeline applied: spatial micro-resampling, 3x3 median filter, and visibility dithering">
+                <span class="text-[10px] px-1.5 py-0.5 text-[#FFFFFF] font-mono" title="Anti-steganography pipeline applied: spatial micro-resampling, 3x3 median filter, and visibility dithering" aria-label="Anti-steganography pipeline applied: spatial micro-resampling, 3x3 median filter, and visibility dithering">
                   DECONTAMINATED
                 </span>
               `
@@ -131,10 +134,7 @@ export function renderQueueList(
           ${
             isProcessing
               ? `
-            <div class="w-full bg-neutral-900 h-1.5 rounded-full overflow-hidden mt-2">
-              <div class="bg-neutral-200 h-full transition-all duration-300" style="width: ${item.progress}%"></div>
-            </div>
-            <div class="text-[10px] text-neutral-400 font-mono flex justify-between">
+            <div class="text-[10px] text-[#FFFFFF] font-mono flex justify-between">
               <span>${item.status === 'analyzing' ? 'Scanning...' : 'Re-encoding...'}</span>
               <span>${item.progress}%</span>
             </div>
@@ -145,7 +145,7 @@ export function renderQueueList(
           ${
             isError
               ? `
-            <div class="text-xs text-red-400 font-mono mt-1">
+            <div class="text-xs text-[#FF4444] font-mono mt-1">
               Error: ${item.error || 'Failed to process'}
             </div>
           `
@@ -158,13 +158,13 @@ export function renderQueueList(
       ${
         isDone && item.result
           ? `
-        <div class="flex items-center gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-neutral-900">
-          <button class="btn-inspect px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-xs font-mono text-neutral-300 hover:text-white transition-colors flex items-center gap-1.5 cursor-pointer">
+        <div class="flex items-center gap-2 shrink-0 pt-2 md:pt-0">
+          <button class="btn-inspect px-3 py-1.5 text-xs font-mono text-[#FFFFFF] hover:text-[#00FF00] transition-colors flex items-center gap-1.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2">
             ${icons.eye}
             <span>Inspect</span>
           </button>
 
-          <button class="btn-download px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs font-mono transition-colors flex items-center gap-1.5 cursor-pointer">
+          <button class="btn-download px-3.5 py-1.5 text-[#00FF00] hover:text-[#FFFFFF] font-semibold text-xs font-mono transition-colors flex items-center gap-1.5 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2">
             ${icons.download}
             <span>Download</span>
           </button>
