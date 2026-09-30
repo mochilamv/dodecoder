@@ -7,20 +7,19 @@
  * 3. Visibility-Threshold Dithering: Deterministic discrete level modulation across RGB channels.
  */
 
-// Catmull-Rom cubic weight calculation with alpha = -0.5
 function cubicWeight(x: number): number {
-  const absX = Math.abs(x);
-  if (absX <= 1.0) {
-    return 1.5 * absX * absX * absX - 2.5 * absX * absX + 1.0;
-  } else if (absX < 2.0) {
-    return -0.5 * absX * absX * absX + 2.5 * absX * absX - 4.0 * absX + 2.0;
+  const ax = x < 0 ? -x : x;
+  if (ax < 1.0) {
+    const ax2 = ax * ax;
+    return ax2 * (1.5 * ax - 2.5) + 1.0;
+  }
+  if (ax < 2.0) {
+    const ax2 = ax * ax;
+    return ax2 * (-0.5 * ax + 2.5) - 4.0 * ax + 2.0;
   }
   return 0.0;
 }
 
-/**
- * Resamples an image buffer to original dimensions using 16-tap Catmull-Rom bicubic interpolation.
- */
 export function resampleBicubic(
   srcData: Uint32Array,
   srcW: number,
@@ -32,7 +31,11 @@ export function resampleBicubic(
 ): void {
   const scaleX = srcW / destW;
   const scaleY = srcH / destH;
+  
+  const srcHMinus1 = srcH - 1;
+  const srcWMinus1 = srcW - 1;
 
+  let destIdx = 0;
   for (let y = 0; y < destH; y++) {
     const srcY = (y + 0.5) * scaleY - 0.5;
     const iy = Math.floor(srcY);
@@ -42,6 +45,11 @@ export function resampleBicubic(
     const wy1 = cubicWeight(py);
     const wy2 = cubicWeight(py - 1);
     const wy3 = cubicWeight(py - 2);
+
+    const ro0 = (iy - 1 < 0 ? 0 : iy - 1 >= srcH ? srcHMinus1 : iy - 1) * srcW;
+    const ro1 = (iy < 0 ? 0 : iy >= srcH ? srcHMinus1 : iy) * srcW;
+    const ro2 = (iy + 1 < 0 ? 0 : iy + 1 >= srcH ? srcHMinus1 : iy + 1) * srcW;
+    const ro3 = (iy + 2 < 0 ? 0 : iy + 2 >= srcH ? srcHMinus1 : iy + 2) * srcW;
 
     for (let x = 0; x < destW; x++) {
       const srcX = (x + 0.5) * scaleX - 0.5;
@@ -53,58 +61,49 @@ export function resampleBicubic(
       const wx2 = cubicWeight(px - 1);
       const wx3 = cubicWeight(px - 2);
 
+      const cx0 = ix - 1 < 0 ? 0 : ix - 1 >= srcW ? srcWMinus1 : ix - 1;
+      const cx1 = ix < 0 ? 0 : ix >= srcW ? srcWMinus1 : ix;
+      const cx2 = ix + 1 < 0 ? 0 : ix + 1 >= srcW ? srcWMinus1 : ix + 1;
+      const cx3 = ix + 2 < 0 ? 0 : ix + 2 >= srcW ? srcWMinus1 : ix + 2;
+
       let r = 0, g = 0, b = 0, a = 0;
 
-      for (let m = -1; m <= 2; m++) {
-        let wy = 0;
-        if (m === -1) wy = wy0;
-        else if (m === 0) wy = wy1;
-        else if (m === 1) wy = wy2;
-        else wy = wy3;
-        if (wy === 0) continue;
-
-        let cy = iy + m;
-        if (cy < 0) cy = 0;
-        else if (cy >= srcH) cy = srcH - 1;
-        const rowOffset = cy * srcW;
-
-        for (let n = -1; n <= 2; n++) {
-          let wx = 0;
-          if (n === -1) wx = wx0;
-          else if (n === 0) wx = wx1;
-          else if (n === 1) wx = wx2;
-          else wx = wx3;
-          if (wx === 0) continue;
-
-          let cx = ix + n;
-          if (cx < 0) cx = 0;
-          else if (cx >= srcW) cx = srcW - 1;
-
-          const w = wx * wy;
-          const pixel = srcData[rowOffset + cx];
-
-          r += (pixel & 0xFF) * w;
-          g += ((pixel >> 8) & 0xFF) * w;
-          b += ((pixel >> 16) & 0xFF) * w;
-          a += ((pixel >> 24) & 0xFF) * w;
-        }
+      // Unrolled 16-tap sampling
+      if (wy0 !== 0) {
+        if (wx0 !== 0) { const p = srcData[ro0 + cx0]; const w = wx0 * wy0; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx1 !== 0) { const p = srcData[ro0 + cx1]; const w = wx1 * wy0; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx2 !== 0) { const p = srcData[ro0 + cx2]; const w = wx2 * wy0; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx3 !== 0) { const p = srcData[ro0 + cx3]; const w = wx3 * wy0; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+      }
+      if (wy1 !== 0) {
+        if (wx0 !== 0) { const p = srcData[ro1 + cx0]; const w = wx0 * wy1; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx1 !== 0) { const p = srcData[ro1 + cx1]; const w = wx1 * wy1; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx2 !== 0) { const p = srcData[ro1 + cx2]; const w = wx2 * wy1; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx3 !== 0) { const p = srcData[ro1 + cx3]; const w = wx3 * wy1; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+      }
+      if (wy2 !== 0) {
+        if (wx0 !== 0) { const p = srcData[ro2 + cx0]; const w = wx0 * wy2; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx1 !== 0) { const p = srcData[ro2 + cx1]; const w = wx1 * wy2; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx2 !== 0) { const p = srcData[ro2 + cx2]; const w = wx2 * wy2; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx3 !== 0) { const p = srcData[ro2 + cx3]; const w = wx3 * wy2; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+      }
+      if (wy3 !== 0) {
+        if (wx0 !== 0) { const p = srcData[ro3 + cx0]; const w = wx0 * wy3; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx1 !== 0) { const p = srcData[ro3 + cx1]; const w = wx1 * wy3; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx2 !== 0) { const p = srcData[ro3 + cx2]; const w = wx2 * wy3; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
+        if (wx3 !== 0) { const p = srcData[ro3 + cx3]; const w = wx3 * wy3; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a += ((p >>> 24) & 0xFF) * w; }
       }
 
-      const outR = Math.min(255, Math.max(0, Math.round(r)));
-      const outG = Math.min(255, Math.max(0, Math.round(g)));
-      const outB = Math.min(255, Math.max(0, Math.round(b)));
-      const outA = hasAlpha ? Math.min(255, Math.max(0, Math.round(a))) : 255;
+      const outR = r < 0 ? 0 : r >= 255.5 ? 255 : (r + 0.5) | 0;
+      const outG = g < 0 ? 0 : g >= 255.5 ? 255 : (g + 0.5) | 0;
+      const outB = b < 0 ? 0 : b >= 255.5 ? 255 : (b + 0.5) | 0;
+      const outA = hasAlpha ? (a < 0 ? 0 : a >= 255.5 ? 255 : (a + 0.5) | 0) : 255;
 
-      destData[y * destW + x] = outR | (outG << 8) | (outB << 16) | (outA << 24);
+      destData[destIdx++] = outR | (outG << 8) | (outB << 16) | (outA << 24);
     }
   }
 }
 
-/**
- * Step 1: Spatial Micro-Resampling
- * Scales canvas to 99.5%, then resamples back to 100% via bicubic interpolation,
- * recalculating weighted pixel averages across the raster.
- */
 export function applySpatialMicroResampling(
   canvas: HTMLCanvasElement | OffscreenCanvas,
   hasAlpha: boolean = true
@@ -113,10 +112,9 @@ export function applySpatialMicroResampling(
   const origH = canvas.height;
   if (origW < 4 || origH < 4) return;
 
-  const downW = Math.max(2, Math.round(origW * 0.995));
-  const downH = Math.max(2, Math.round(origH * 0.995));
+  const downW = Math.max(2, (origW * 0.995 + 0.5) | 0);
+  const downH = Math.max(2, (origH * 0.995 + 0.5) | 0);
 
-  // 1. Downscale to 99.5%
   let downCanvas: HTMLCanvasElement | OffscreenCanvas;
   if (typeof OffscreenCanvas !== 'undefined') {
     downCanvas = new OffscreenCanvas(downW, downH);
@@ -134,7 +132,6 @@ export function applySpatialMicroResampling(
   const downImgData = downCtx.getImageData(0, 0, downW, downH);
   const downData = new Uint32Array(downImgData.data.buffer);
 
-  // 2. Resample back to original dimensions using bicubic interpolation
   const destCtx = canvas.getContext('2d', { willReadFrequently: true }) as
     | CanvasRenderingContext2D
     | OffscreenCanvasRenderingContext2D;
@@ -145,9 +142,6 @@ export function applySpatialMicroResampling(
   destCtx.putImageData(destImgData, 0, 0);
 }
 
-/**
- * Insertion sort for 9 elements. Fast, deterministic, zero allocation.
- */
 function sort9(arr: Uint8Array): void {
   for (let i = 1; i < 9; i++) {
     const val = arr[i];
@@ -160,9 +154,6 @@ function sort9(arr: Uint8Array): void {
   }
 }
 
-/**
- * Deterministic CPU 3x3 Median Filter fallback.
- */
 export function applyMedianFilterCpu(
   data: Uint8ClampedArray,
   width: number,
@@ -176,15 +167,19 @@ export function applyMedianFilterCpu(
   const g = new Uint8Array(9);
   const b = new Uint8Array(9);
 
+  const wMinus1 = width - 1;
+  const hMinus1 = height - 1;
+
   for (let y = 0; y < height; y++) {
+    const rowBase = y * width;
     for (let x = 0; x < width; x++) {
       let idx = 0;
       for (let dy = -1; dy <= 1; dy++) {
-        const ny = Math.min(height - 1, Math.max(0, y + dy));
+        const ny = y + dy < 0 ? 0 : y + dy > hMinus1 ? hMinus1 : y + dy;
         const row = ny * width;
         for (let dx = -1; dx <= 1; dx++) {
-          const nx = Math.min(width - 1, Math.max(0, x + dx));
-          const p = (row + nx) * 4;
+          const nx = x + dx < 0 ? 0 : x + dx > wMinus1 ? wMinus1 : x + dx;
+          const p = (row + nx) << 2;
           r[idx] = data[p];
           g[idx] = data[p + 1];
           b[idx] = data[p + 2];
@@ -196,21 +191,15 @@ export function applyMedianFilterCpu(
       sort9(g);
       sort9(b);
 
-      const outPos = (y * width + x) * 4;
+      const outPos = (rowBase + x) << 2;
       output[outPos] = r[4];
       output[outPos + 1] = g[4];
       output[outPos + 2] = b[4];
-      // Keep alpha channel intact
     }
   }
-
   data.set(output);
 }
 
-/**
- * Step 2: Hardware-Accelerated 3x3 Median Filter
- * Uses WebGL fragment shader with fallback to CPU.
- */
 export function applyMedianFilter3x3(
   canvas: HTMLCanvasElement | OffscreenCanvas
 ): void {
@@ -225,7 +214,6 @@ export function applyMedianFilter3x3(
 
   if (!ctx2d) return;
 
-  // Try WebGL path
   let glCanvas: HTMLCanvasElement | OffscreenCanvas | null = null;
   let gl: WebGLRenderingContext | null = null;
 
@@ -243,7 +231,6 @@ export function applyMedianFilter3x3(
   }
 
   if (!gl) {
-    // Transparent CPU fallback
     const imgData = ctx2d.getImageData(0, 0, w, h);
     applyMedianFilterCpu(imgData.data, w, h);
     ctx2d.putImageData(imgData, 0, 0);
@@ -343,54 +330,46 @@ export function applyMedianFilter3x3(
 
     ctx2d.drawImage(glCanvas as any, 0, 0);
   } catch {
-    // If WebGL pipeline fails at runtime, fallback to CPU
     const imgData = ctx2d.getImageData(0, 0, w, h);
     applyMedianFilterCpu(imgData.data, w, h);
     ctx2d.putImageData(imgData, 0, 0);
   }
 }
 
-/**
- * Step 3: Visibility-Threshold Dithering
- * Injects deterministic discrete level offsets in range [-2, 2] across RGB channels,
- * breaking steganographic parity checks while remaining imperceptible to the human eye.
- */
 export function applyVisibilityDithering(
   data: Uint8ClampedArray | Uint8Array,
   seed: number = 0x5f3759df
 ): void {
   let state = seed || 0x12345678;
+  const len = data.length;
 
-  for (let i = 0; i < data.length; i += 4) {
-    // XorShift32
+  for (let i = 0; i < len; i += 4) {
     state ^= state << 13;
     state ^= state >>> 17;
     state ^= state << 5;
 
-    // Discrete offset in {-2, -1, 1, 2}
     const rSign = (state & 1) === 0 ? 1 : -1;
-    const rMag = ((state >> 1) & 1) + 1;
+    const rMag = ((state >>> 1) & 1) + 1;
     const rOffset = rSign * rMag;
 
-    const gSign = ((state >> 2) & 1) === 0 ? 1 : -1;
-    const gMag = ((state >> 3) & 1) + 1;
+    const gSign = ((state >>> 2) & 1) === 0 ? 1 : -1;
+    const gMag = ((state >>> 3) & 1) + 1;
     const gOffset = gSign * gMag;
 
-    const bSign = ((state >> 4) & 1) === 0 ? 1 : -1;
-    const bMag = ((state >> 5) & 1) + 1;
+    const bSign = ((state >>> 4) & 1) === 0 ? 1 : -1;
+    const bMag = ((state >>> 5) & 1) + 1;
     const bOffset = bSign * bMag;
 
-    data[i] = Math.min(255, Math.max(0, data[i] + rOffset));
-    data[i + 1] = Math.min(255, Math.max(0, data[i + 1] + gOffset));
-    data[i + 2] = Math.min(255, Math.max(0, data[i + 2] + bOffset));
+    let nr = data[i] + rOffset;
+    let ng = data[i + 1] + gOffset;
+    let nb = data[i + 2] + bOffset;
+
+    data[i]     = nr < 0 ? 0 : nr > 255 ? 255 : nr;
+    data[i + 1] = ng < 0 ? 0 : ng > 255 ? 255 : ng;
+    data[i + 2] = nb < 0 ? 0 : nb > 255 ? 255 : nb;
   }
 }
 
-/**
- * Step 4: Forced YUV 4:2:0 Chroma Subsampling
- * Averages chroma (Cb, Cr) across 2x2 pixel blocks while preserving full-resolution Luma (Y),
- * destroying color-channel anchored steganographic payloads and PRNU carrier patterns.
- */
 export function applyYuv420ChromaSubsampling(
   data: Uint8ClampedArray,
   width: number,
@@ -398,78 +377,87 @@ export function applyYuv420ChromaSubsampling(
 ): void {
   for (let by = 0; by < height; by += 2) {
     const hasNextRow = by + 1 < height;
+    const rowOffset0 = by * width;
+    const rowOffset1 = (by + 1) * width;
+
     for (let bx = 0; bx < width; bx += 2) {
       const hasNextCol = bx + 1 < width;
 
-      // 2x2 block pixel coordinates
-      const coords: Array<[number, number]> = [[bx, by]];
-      if (hasNextCol) coords.push([bx + 1, by]);
-      if (hasNextRow) coords.push([bx, by + 1]);
-      if (hasNextRow && hasNextCol) coords.push([bx + 1, by + 1]);
+      const idx0 = (rowOffset0 + bx) << 2;
+      let count = 1;
 
-      let sumCb = 0;
-      let sumCr = 0;
-      const yValues: number[] = [];
+      const r0 = data[idx0];
+      const g0 = data[idx0 + 1];
+      const b0 = data[idx0 + 2];
+      
+      const y0 = 0.299 * r0 + 0.587 * g0 + 0.114 * b0;
+      let sumCb = -0.168736 * r0 - 0.331264 * g0 + 0.5 * b0 + 128;
+      let sumCr = 0.5 * r0 - 0.418688 * g0 - 0.081312 * b0 + 128;
 
-      for (const [x, y] of coords) {
-        const idx = (y * width + x) * 4;
-        const r = data[idx];
-        const g = data[idx + 1];
-        const b = data[idx + 2];
+      let y1 = 0, y2 = 0, y3 = 0;
+      let idx1 = 0, idx2 = 0, idx3 = 0;
 
-        // Standard ITU-R BT.601 conversion
-        const luma = 0.299 * r + 0.587 * g + 0.114 * b;
-        const cb = -0.168736 * r - 0.331264 * g + 0.5 * b + 128;
-        const cr = 0.5 * r - 0.418688 * g - 0.081312 * b + 128;
-
-        yValues.push(luma);
-        sumCb += cb;
-        sumCr += cr;
+      if (hasNextCol) {
+        idx1 = idx0 + 4;
+        const r = data[idx1], g = data[idx1 + 1], b = data[idx1 + 2];
+        y1 = 0.299 * r + 0.587 * g + 0.114 * b;
+        sumCb += -0.168736 * r - 0.331264 * g + 0.5 * b + 128;
+        sumCr += 0.5 * r - 0.418688 * g - 0.081312 * b + 128;
+        count++;
+      }
+      if (hasNextRow) {
+        idx2 = (rowOffset1 + bx) << 2;
+        const r = data[idx2], g = data[idx2 + 1], b = data[idx2 + 2];
+        y2 = 0.299 * r + 0.587 * g + 0.114 * b;
+        sumCb += -0.168736 * r - 0.331264 * g + 0.5 * b + 128;
+        sumCr += 0.5 * r - 0.418688 * g - 0.081312 * b + 128;
+        count++;
+      }
+      if (hasNextRow && hasNextCol) {
+        idx3 = idx2 + 4;
+        const r = data[idx3], g = data[idx3 + 1], b = data[idx3 + 2];
+        y3 = 0.299 * r + 0.587 * g + 0.114 * b;
+        sumCb += -0.168736 * r - 0.331264 * g + 0.5 * b + 128;
+        sumCr += 0.5 * r - 0.418688 * g - 0.081312 * b + 128;
+        count++;
       }
 
-      const avgCb = sumCb / coords.length;
-      const avgCr = sumCr / coords.length;
+      const cbShift = (sumCb / count) - 128;
+      const crShift = (sumCr / count) - 128;
 
-      // Reconstruct RGB for each pixel using individual Luma and block-averaged Chroma
-      for (let i = 0; i < coords.length; i++) {
-        const [x, y] = coords[i];
-        const idx = (y * width + x) * 4;
-        const luma = yValues[i];
+      data[idx0]     = y0 + 1.402 * crShift;
+      data[idx0 + 1] = y0 - 0.344136 * cbShift - 0.714136 * crShift;
+      data[idx0 + 2] = y0 + 1.772 * cbShift;
 
-        const cbShift = avgCb - 128;
-        const crShift = avgCr - 128;
-
-        const r = luma + 1.402 * crShift;
-        const g = luma - 0.344136 * cbShift - 0.714136 * crShift;
-        const b = luma + 1.772 * cbShift;
-
-        data[idx] = Math.min(255, Math.max(0, Math.round(r)));
-        data[idx + 1] = Math.min(255, Math.max(0, Math.round(g)));
-        data[idx + 2] = Math.min(255, Math.max(0, Math.round(b)));
+      if (hasNextCol) {
+        data[idx1]     = y1 + 1.402 * crShift;
+        data[idx1 + 1] = y1 - 0.344136 * cbShift - 0.714136 * crShift;
+        data[idx1 + 2] = y1 + 1.772 * cbShift;
+      }
+      if (hasNextRow) {
+        data[idx2]     = y2 + 1.402 * crShift;
+        data[idx2 + 1] = y2 - 0.344136 * cbShift - 0.714136 * crShift;
+        data[idx2 + 2] = y2 + 1.772 * cbShift;
+      }
+      if (hasNextRow && hasNextCol) {
+        data[idx3]     = y3 + 1.402 * crShift;
+        data[idx3 + 1] = y3 - 0.344136 * cbShift - 0.714136 * crShift;
+        data[idx3 + 2] = y3 + 1.772 * cbShift;
       }
     }
   }
 }
 
-/**
- * Executes the complete Deep Decontamination Pipeline on a canvas.
- */
 export function applyDeepDecontamination(
   canvas: HTMLCanvasElement | OffscreenCanvas,
   hasAlpha: boolean = true
 ): void {
-  // 1. Spatial Micro-Resampling
   applySpatialMicroResampling(canvas, hasAlpha);
-
-  // 2. Hardware-Accelerated 3x3 Median Filter
   applyMedianFilter3x3(canvas);
-
-  // 3. Visibility-Threshold Dithering & YUV 4:2:0 Chroma Subsampling
   const ctx = canvas.getContext('2d', { willReadFrequently: true }) as
     | CanvasRenderingContext2D
     | OffscreenCanvasRenderingContext2D
     | null;
-
   if (ctx) {
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     applyYuv420ChromaSubsampling(imgData.data, canvas.width, canvas.height);

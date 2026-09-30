@@ -262,86 +262,40 @@ test('7. WebP ALPH (Alpha transparency) chunk recognized as legitimate and safe'
   assert.equal(alphMarker.name, 'WebP Chunk: ALPH');
 });
 
-test('8. Fast-Track Bypass: countSuspiciousMetadataTags validation for JPEG and PNG', async () => {
-  const { countSuspiciousMetadataTags } = await import('../src/core/forensic/marker-parser');
+test('8. Fast-Track Bypass Elimination: countSuspiciousMetadataTags permanently removed', async () => {
+  const markerParserExports = await import('../src/core/forensic/marker-parser');
 
-  // 1. Clean JPEG without metadata (SOI, DQT, SOF, SOS, EOI)
-  const cleanJpeg = new Uint8Array([
-    0xff, 0xd8, // SOI
-    0xff, 0xdb, 0x00, 0x04, 0x00, 0x01, // DQT
-    0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00, // SOF
-    0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00, 0x12, 0x34, // SOS
-    0xff, 0xd9 // EOI
-  ]);
-  assert.equal(countSuspiciousMetadataTags(cleanJpeg, 'image/jpeg'), 0, 'Clean JPEG must yield 0 suspicious tags');
+  // Verify the bypass tag counter function no longer exists as an export
+  assert.equal(
+    'countSuspiciousMetadataTags' in markerParserExports,
+    false,
+    'countSuspiciousMetadataTags must be permanently removed — Fast-Track Bypass is eliminated'
+  );
 
-  // 2. JPEG with APP1/Exif containing IFD0 pointing to IFD1 (embedded thumbnail)
-  // TIFF: 'II' (0x4949) + 42 (0x002A) + ifd0Offset = 8
-  // At offset 8: entryCount = 1 (entry is 12 bytes -> ends at offset 22)
-  // At offset 22: nextIfdOffset = 30 (points to IFD1!)
-  const jpegWithIfd1 = new Uint8Array([
-    0xff, 0xd8, // SOI
-    // APP1 header (length 44)
-    0xff, 0xe1, 0x00, 0x2c,
-    0x45, 0x78, 0x69, 0x66, 0x00, 0x00, // 'Exif\0\0'
-    // TIFF header
-    0x49, 0x49, 0x2a, 0x00, // 'II' + 42
-    0x08, 0x00, 0x00, 0x00, // IFD0 offset = 8
-    // IFD0: 1 entry (12 bytes)
-    0x01, 0x00, // 1 entry
-    0x0f, 0x01, 0x02, 0x00, 0x05, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00, // Make tag
-    0x1e, 0x00, 0x00, 0x00, // nextIfdOffset = 30 (IFD1 exists!)
-    // IFD1 data
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    // SOF, SOS, EOI
-    0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00,
-    0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00,
-    0xff, 0xd9
-  ]);
-  const jpegTags = countSuspiciousMetadataTags(jpegWithIfd1, 'image/jpeg');
-  assert.equal(jpegTags, 2, 'JPEG with APP1/Exif and IFD1 pointer must count 2 suspicious tags (APP1 + IFD1)');
-
-  // 3. Clean PNG without metadata
-  const cleanPng = new Uint8Array([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
-    0x00, 0x00, 0x00, 0x02, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x05, 0xfe, 0x02, 0xfe,
-    0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
-  ]);
-  assert.equal(countSuspiciousMetadataTags(cleanPng, 'image/png'), 0, 'Clean PNG must yield 0 suspicious tags');
-
-  // 4. PNG with tEXt and iCCP chunks
-  const pngWithMetadata = new Uint8Array([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
-    // tEXt chunk
-    0x00, 0x00, 0x00, 0x04, 0x74, 0x45, 0x58, 0x74, 0x61, 0x62, 0x63, 0x64, 0x00, 0x00, 0x00, 0x00,
-    // iCCP chunk
-    0x00, 0x00, 0x00, 0x04, 0x69, 0x43, 0x43, 0x50, 0x70, 0x72, 0x6f, 0x66, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x02, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x05, 0xfe, 0x02, 0xfe,
-    0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
-  ]);
-  assert.equal(countSuspiciousMetadataTags(pngWithMetadata, 'image/png'), 2, 'PNG with tEXt and iCCP must count 2 suspicious tags');
+  // Verify inspectBinaryMarkers still exists as the sole forensic inspection entry point
+  assert.equal(
+    typeof markerParserExports.inspectBinaryMarkers,
+    'function',
+    'inspectBinaryMarkers must remain as the canonical forensic marker inspector'
+  );
 });
 
-test('9. Surgical Bloat Fallback: stripAllMetadataSurgical eliminates metadata and guarantees size <= input', async () => {
-  const { stripAllMetadataSurgical } = await import('../src/core/image/icc-sanitizer');
+test('9. Bypass Alias Elimination: stripAllMetadataSurgical permanently removed', async () => {
+  const iccSanitizerExports = await import('../src/core/image/icc-sanitizer');
 
-  // Input PNG with tEXt and iCCP metadata
-  const bloatedPng = new Uint8Array([
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89,
-    0x00, 0x00, 0x00, 0x08, 0x74, 0x45, 0x58, 0x74, 0x61, 0x75, 0x74, 0x68, 0x6f, 0x72, 0x3d, 0x78, 0x12, 0x34, 0x56, 0x78,
-    0x00, 0x00, 0x00, 0x08, 0x69, 0x43, 0x43, 0x50, 0x70, 0x72, 0x6f, 0x66, 0x69, 0x6c, 0x65, 0x00, 0x12, 0x34, 0x56, 0x78,
-    0x00, 0x00, 0x00, 0x02, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x05, 0xfe, 0x02, 0xfe,
-    0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82
-  ]);
+  // Verify the bypass alias no longer exists as an export
+  assert.equal(
+    'stripAllMetadataSurgical' in iccSanitizerExports,
+    false,
+    'stripAllMetadataSurgical must be permanently removed — Bypass and Bloat Fallback is eliminated'
+  );
 
-  const surgicallyCleaned = stripAllMetadataSurgical(bloatedPng, 'image/png');
-  assert.ok(surgicallyCleaned.length < bloatedPng.length, 'Surgically cleaned PNG must be strictly smaller than input');
-  
-  const { countSuspiciousMetadataTags } = await import('../src/core/forensic/marker-parser');
-  assert.equal(countSuspiciousMetadataTags(surgicallyCleaned, 'image/png'), 0, 'Surgically cleaned PNG must have 0 suspicious tags');
+  // Verify stripDisplayColorProfiles still exists for post-encoding ICC purging
+  assert.equal(
+    typeof iccSanitizerExports.stripDisplayColorProfiles,
+    'function',
+    'stripDisplayColorProfiles must remain as the canonical post-encoding ICC purger'
+  );
 });
 
 test('10. 128-bit SHA-256 Naming and Chained Extension Sanitization', async () => {
@@ -478,7 +432,7 @@ test('12. Deep Decontamination Pipeline: Resampling, Median Filter, and Visibili
   assert.equal(destBuffer.length, 16, 'Resampled buffer must match target raster dimension');
 });
 
-test('13. Enforced Unified Lossy VP8 Pipeline and Bypass Suppression', async () => {
+test('13. Enforced Unified Lossy VP8 Pipeline, Bypass Suppression, and Image Guard Validation', async () => {
   // Verify that all images route strictly to lossy VP8 with quality strictly 0.60
   const effectiveMime = 'image/webp';
   const effectiveQuality = 0.60;
@@ -488,6 +442,38 @@ test('13. Enforced Unified Lossy VP8 Pipeline and Bypass Suppression', async () 
   // Verify that bypass is completely disabled
   const shouldBypass = false;
   assert.equal(shouldBypass, false, '1:1 bypass must be completely disabled for all image assets');
+
+  // Verify isImageMimeType guard correctly classifies all image types
+  const { isImageMimeType } = await import('../src/core/media/media-sanitizer');
+
+  const imageInputs: Array<[string, string]> = [
+    ['image/jpeg', 'photo.jpg'],
+    ['image/png', 'graphic.png'],
+    ['image/webp', 'capture.webp'],
+    ['image/bmp', 'scan.bmp'],
+    ['image/tiff', 'raw.tiff'],
+    ['image/gif', 'animation.gif'],
+    ['image/avif', 'modern.avif'],
+    ['image/heic', 'apple.heic'],
+    ['', 'unnamed.jpeg'],       // MIME empty but extension matches
+    ['', 'screenshot.PNG'],     // Case-insensitive extension
+  ];
+
+  for (const [mime, name] of imageInputs) {
+    assert.equal(isImageMimeType(mime, name), true, `isImageMimeType must reject: MIME="${mime}" name="${name}"`);
+  }
+
+  // Verify isImageMimeType correctly allows media types
+  const mediaInputs: Array<[string, string]> = [
+    ['video/mp4', 'clip.mp4'],
+    ['audio/mpeg', 'track.mp3'],
+    ['video/quicktime', 'recording.mov'],
+    ['audio/wav', 'sample.wav'],
+  ];
+
+  for (const [mime, name] of mediaInputs) {
+    assert.equal(isImageMimeType(mime, name), false, `isImageMimeType must allow: MIME="${mime}" name="${name}"`);
+  }
 });
 
 test('14. Forced YUV 4:2:0 Chroma Subsampling destroys color-channel steganographic modulation', async () => {
@@ -515,8 +501,8 @@ test('14. Forced YUV 4:2:0 Chroma Subsampling destroys color-channel steganograp
   assert.ok(raster[4] > 0 || raster[5] > 0, 'Chroma averaging must diffuse color channel values');
 });
 
-test('15. Mandatory One-Way Image Re-Synthesis and Isolation of In-Place Manipulation to Media', async () => {
-  const { isMp4OrMov, isAudioFile } = await import('../src/core/media/media-sanitizer');
+test('15. Mandatory One-Way Image Re-Synthesis and Hard Boundary Isolation of In-Place Manipulation', async () => {
+  const { isMp4OrMov, isAudioFile, isImageMimeType, sanitizeMedia } = await import('../src/core/media/media-sanitizer');
 
   // 1. Verify in-place structural manipulation is strictly rejected for all image types
   const imageFormats = [
@@ -531,11 +517,42 @@ test('15. Mandatory One-Way Image Re-Synthesis and Isolation of In-Place Manipul
     const bytes = new Uint8Array([...img.magic, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
     assert.equal(isMp4OrMov(bytes), false, `${img.name} must never be classified as MP4/MOV`);
     assert.equal(isAudioFile(img.mime, img.name), false, `${img.name} must never be classified as audio`);
+    assert.equal(isImageMimeType(img.mime, img.name), true, `${img.name} must be classified as image by isImageMimeType`);
   }
 
   // 2. Verify media classifiers accept valid MP4/MOV and audio formats
   const mp4Header = new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
   assert.equal(isMp4OrMov(mp4Header), true, 'ISOBMFF header must be recognized for in-place mutation');
   assert.equal(isAudioFile('audio/mpeg', 'track.mp3'), true, 'MP3 audio must be recognized for audio stripping');
+
+  // 3. Verify sanitizeMedia THROWS for image payloads (hard boundary enforcement)
+  for (const img of imageFormats) {
+    const fakeFile = new File([new Uint8Array(img.magic)], img.name, { type: img.mime });
+    await assert.rejects(
+      () => sanitizeMedia(fakeFile, { defenseLevel: 'paranoid' }),
+      /Image payload rejected from media pipeline/,
+      `sanitizeMedia must throw for ${img.name} — images must never enter in-place mutation`
+    );
+  }
+});
+
+test('16. Pipeline Rejects Unrecognized File Types with Hard Error', async () => {
+  const { processMediaFile } = await import('../src/core/pipeline');
+
+  const unsupportedFormats = [
+    { name: 'document.pdf', mime: 'application/pdf' },
+    { name: 'archive.zip', mime: 'application/zip' },
+    { name: 'data.json', mime: 'application/json' },
+    { name: 'spreadsheet.xlsx', mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+  ];
+
+  for (const fmt of unsupportedFormats) {
+    const fakeFile = new File([new Uint8Array([0x00, 0x01, 0x02, 0x03])], fmt.name, { type: fmt.mime });
+    await assert.rejects(
+      () => processMediaFile(fakeFile),
+      /Unsupported file type/,
+      `processMediaFile must throw for unrecognized type: ${fmt.name} (${fmt.mime})`
+    );
+  }
 });
 

@@ -1,7 +1,7 @@
 import { DefenseLevel } from '../types';
 
 export interface PrnuTransformConfig {
-  theta: number; // radians
+  theta: number;
   sx: number;
   sy: number;
   noiseIntensity: number;
@@ -18,30 +18,29 @@ export function calculateAntiPrnuConfig(
   const seed = new Uint32Array(3);
   crypto.getRandomValues(seed);
 
-  // Rotation theta in [0.1, 0.3] degrees, randomized sign
   const thetaDeg = 0.1 + (seed[0] / 0xFFFFFFFF) * 0.2;
   const sign = (seed[0] % 2 === 0) ? 1 : -1;
   const theta = sign * (thetaDeg * Math.PI) / 180.0;
 
-  // Anisotropic scaling |sx - sy| >= 0.0005
-  // sx in [0.995, 0.999]
   const sx = 0.995 + (seed[1] / 0xFFFFFFFF) * 0.004;
   let sy = 0.995 + (seed[2] / 0xFFFFFFFF) * 0.004;
   
-  if (Math.abs(sx - sy) < 0.0005) {
+  if (sx - sy > -0.0005 && sx - sy < 0.0005) {
       sy = sx < 0.997 ? sx + 0.0006 : sx - 0.0006;
   }
 
   return { theta, sx, sy, noiseIntensity: skipNoise ? 0 : 2 };
 }
 
-// Fast Catmull-Rom weight calculation (alpha = -0.5)
 function cubicWeight(x: number): number {
-  const absX = Math.abs(x);
-  if (absX <= 1.0) {
-    return 1.5 * absX * absX * absX - 2.5 * absX * absX + 1.0;
-  } else if (absX < 2.0) {
-    return -0.5 * absX * absX * absX + 2.5 * absX * absX - 4.0 * absX + 2.0;
+  const ax = x < 0 ? -x : x;
+  if (ax < 1.0) {
+    const ax2 = ax * ax;
+    return ax2 * (1.5 * ax - 2.5) + 1.0;
+  }
+  if (ax < 2.0) {
+    const ax2 = ax * ax;
+    return ax2 * (-0.5 * ax + 2.5) - 4.0 * ax + 2.0;
   }
   return 0.0;
 }
@@ -66,14 +65,12 @@ export function applyPrnuDefense(
 
   const config = calculateAntiPrnuConfig(level, skipNoise);
 
-  // We need the source data. Render to an offscreen canvas.
   const srcCanvas = new OffscreenCanvas(origW, origH);
   const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
   srcCtx.drawImage(sourceImage, 0, 0);
   const srcImgData = srcCtx.getImageData(0, 0, origW, origH);
-  const srcData = new Uint32Array(srcImgData.data.buffer); // 32-bit access for speed (ABGR)
+  const srcData = new Uint32Array(srcImgData.data.buffer);
 
-  // Crop slightly to hide boundaries rotated inwards
   const crop = 3;
   const destW = origW - crop * 2;
   const destH = origH - crop * 2;
@@ -84,49 +81,46 @@ export function applyPrnuDefense(
   const destImgData = destCtx.createImageData(destW, destH);
   const destData = new Uint32Array(destImgData.data.buffer);
 
-  // Affine Matrix
   const cosT = Math.cos(config.theta);
   const sinT = Math.sin(config.theta);
   
-  // Forward matrix: [sx*cosT, -sy*sinT; sx*sinT, sy*cosT]
   const a = config.sx * cosT;
   const b = -config.sy * sinT;
   const c = config.sx * sinT;
   const d = config.sy * cosT;
   
-  // Inverse matrix
   const det = a * d - b * c;
   const invA = d / det;
   const invB = -b / det;
   const invC = -c / det;
   const invD = a / det;
 
-  const cx = origW / 2.0;
-  const cy = origH / 2.0;
+  const cx = origW * 0.5;
+  const cy = origH * 0.5;
 
-  // Dithering setup
   const entropy = new Uint32Array(1);
   crypto.getRandomValues(entropy);
   let state = entropy[0] || 0x12345678;
 
-  // Fast Bicubic Interpolation with DDA
+  const origHMinus1 = origH - 1;
+  const origWMinus1 = origW - 1;
+
+  let destIdx = 0;
+  const applyNoise = config.noiseIntensity > 0;
+
   for (let y = 0; y < destH; y++) {
-    // Center offset y
     const dy = y + crop - cy;
-    
-    // Constant terms for this scanline
     const startX = -cx + crop;
+    
     let srcX = startX * invA + dy * invB + cx;
     let srcY = startX * invC + dy * invD + cy;
 
     for (let x = 0; x < destW; x++) {
-      // 1. Get integer coordinates and fractional parts
       const ix = Math.floor(srcX);
       const iy = Math.floor(srcY);
       const px = srcX - ix;
       const py = srcY - iy;
 
-      // 2. Precalculate weights
       const wx0 = cubicWeight(px + 1);
       const wx1 = cubicWeight(px);
       const wx2 = cubicWeight(px - 1);
@@ -137,65 +131,62 @@ export function applyPrnuDefense(
       const wy2 = cubicWeight(py - 1);
       const wy3 = cubicWeight(py - 2);
 
+      const ro0 = (iy - 1 < 0 ? 0 : iy - 1 > origHMinus1 ? origHMinus1 : iy - 1) * origW;
+      const ro1 = (iy < 0 ? 0 : iy > origHMinus1 ? origHMinus1 : iy) * origW;
+      const ro2 = (iy + 1 < 0 ? 0 : iy + 1 > origHMinus1 ? origHMinus1 : iy + 1) * origW;
+      const ro3 = (iy + 2 < 0 ? 0 : iy + 2 > origHMinus1 ? origHMinus1 : iy + 2) * origW;
+
+      const cx0 = ix - 1 < 0 ? 0 : ix - 1 > origWMinus1 ? origWMinus1 : ix - 1;
+      const cx1 = ix < 0 ? 0 : ix > origWMinus1 ? origWMinus1 : ix;
+      const cx2 = ix + 1 < 0 ? 0 : ix + 1 > origWMinus1 ? origWMinus1 : ix + 1;
+      const cx3 = ix + 2 < 0 ? 0 : ix + 2 > origWMinus1 ? origWMinus1 : ix + 2;
+
       let r = 0, g = 0, b = 0, a_ch = 0;
 
-      // 3. 16-tap sampling (4x4)
-      for (let m = -1; m <= 2; m++) {
-        let wy = 0;
-        if (m === -1) wy = wy0;
-        else if (m === 0) wy = wy1;
-        else if (m === 1) wy = wy2;
-        else wy = wy3;
-        if (wy === 0) continue;
-
-        let cy_idx = iy + m;
-        if (cy_idx < 0) cy_idx = 0;
-        else if (cy_idx >= origH) cy_idx = origH - 1;
-        
-        const rowOffset = cy_idx * origW;
-
-        for (let n = -1; n <= 2; n++) {
-          let wx = 0;
-          if (n === -1) wx = wx0;
-          else if (n === 0) wx = wx1;
-          else if (n === 1) wx = wx2;
-          else wx = wx3;
-          if (wx === 0) continue;
-
-          let cx_idx = ix + n;
-          if (cx_idx < 0) cx_idx = 0;
-          else if (cx_idx >= origW) cx_idx = origW - 1;
-
-          const w = wx * wy;
-          const pixel = srcData[rowOffset + cx_idx];
-          
-          // Little-endian ABGR: [R, G, B, A] in memory means:
-          // byte 0: R, byte 1: G, byte 2: B, byte 3: A
-          r += (pixel & 0xFF) * w;
-          g += ((pixel >> 8) & 0xFF) * w;
-          b += ((pixel >> 16) & 0xFF) * w;
-          a_ch += ((pixel >> 24) & 0xFF) * w;
-        }
+      if (wy0 !== 0) {
+        if (wx0 !== 0) { const p = srcData[ro0 + cx0]; const w = wx0 * wy0; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx1 !== 0) { const p = srcData[ro0 + cx1]; const w = wx1 * wy0; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx2 !== 0) { const p = srcData[ro0 + cx2]; const w = wx2 * wy0; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx3 !== 0) { const p = srcData[ro0 + cx3]; const w = wx3 * wy0; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+      }
+      if (wy1 !== 0) {
+        if (wx0 !== 0) { const p = srcData[ro1 + cx0]; const w = wx0 * wy1; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx1 !== 0) { const p = srcData[ro1 + cx1]; const w = wx1 * wy1; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx2 !== 0) { const p = srcData[ro1 + cx2]; const w = wx2 * wy1; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx3 !== 0) { const p = srcData[ro1 + cx3]; const w = wx3 * wy1; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+      }
+      if (wy2 !== 0) {
+        if (wx0 !== 0) { const p = srcData[ro2 + cx0]; const w = wx0 * wy2; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx1 !== 0) { const p = srcData[ro2 + cx1]; const w = wx1 * wy2; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx2 !== 0) { const p = srcData[ro2 + cx2]; const w = wx2 * wy2; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx3 !== 0) { const p = srcData[ro2 + cx3]; const w = wx3 * wy2; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+      }
+      if (wy3 !== 0) {
+        if (wx0 !== 0) { const p = srcData[ro3 + cx0]; const w = wx0 * wy3; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx1 !== 0) { const p = srcData[ro3 + cx1]; const w = wx1 * wy3; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx2 !== 0) { const p = srcData[ro3 + cx2]; const w = wx2 * wy3; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
+        if (wx3 !== 0) { const p = srcData[ro3 + cx3]; const w = wx3 * wy3; r += (p & 0xFF) * w; g += ((p >> 8) & 0xFF) * w; b += ((p >> 16) & 0xFF) * w; a_ch += ((p >>> 24) & 0xFF) * w; }
       }
 
-      // XorShift32 for dithering (omitted when noiseIntensity === 0 for flat media)
       let noise = 0;
-      if (config.noiseIntensity > 0) {
+      if (applyNoise) {
         state ^= state << 13;
         state ^= state >>> 17;
         state ^= state << 5;
-        noise = ((state & 0xFF) % 5) - 2; // [-2, 2]
+        noise = ((state & 0xFF) % 5) - 2;
       }
 
-      // Clamp and write
-      const outR = Math.min(255, Math.max(0, r + noise));
-      const outG = Math.min(255, Math.max(0, g + noise));
-      const outB = Math.min(255, Math.max(0, b + noise));
-      const outA = hasAlpha ? Math.min(255, Math.max(0, a_ch)) : 255;
+      const fR = r + noise;
+      const fG = g + noise;
+      const fB = b + noise;
 
-      destData[y * destW + x] = outR | (outG << 8) | (outB << 16) | (outA << 24);
+      const outR = fR < 0 ? 0 : fR >= 255.5 ? 255 : (fR + 0.5) | 0;
+      const outG = fG < 0 ? 0 : fG >= 255.5 ? 255 : (fG + 0.5) | 0;
+      const outB = fB < 0 ? 0 : fB >= 255.5 ? 255 : (fB + 0.5) | 0;
+      const outA = hasAlpha ? (a_ch < 0 ? 0 : a_ch >= 255.5 ? 255 : (a_ch + 0.5) | 0) : 255;
 
-      // Advance DDA
+      destData[destIdx++] = outR | (outG << 8) | (outB << 16) | (outA << 24);
+
       srcX += invA;
       srcY += invC;
     }

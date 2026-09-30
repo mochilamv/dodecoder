@@ -6,6 +6,16 @@ export interface MediaSanitizerOptions {
   defenseLevel: DefenseLevel;
 }
 
+/**
+ * Image MIME Type Guard
+ * Hard boundary: all image formats are strictly rejected from the in-place
+ * structural manipulation pipeline to enforce mandatory canvas re-synthesis routing.
+ */
+export function isImageMimeType(mimeType: string, name: string): boolean {
+  return mimeType.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp|gif|tiff|tif|avif|heic|heif|svg)$/i.test(name);
+}
+
+
 // FourCC Integer constants for branchless matching
 export const FOURCC_FTYP = 0x66747970;
 export const FOURCC_MOOV = 0x6d6f6f76;
@@ -169,6 +179,14 @@ export async function sanitizeMediaWithWorker(
   mimeType: string,
   originalName: string
 ): Promise<Uint8Array> {
+  // Hard boundary: reject all image payloads from in-place manipulation
+  if (isImageMimeType(mimeType, originalName)) {
+    throw new Error(
+      `Image payload rejected from media pipeline: MIME="${mimeType}" name="${originalName}". ` +
+      'Image assets must route exclusively through canvas re-synthesis.'
+    );
+  }
+
   if (typeof Worker !== 'undefined') {
     return new Promise<Uint8Array>((resolve, reject) => {
       try {
@@ -219,6 +237,16 @@ export async function sanitizeMedia(
   options: MediaSanitizerOptions,
   onProgress?: (percent: number) => void
 ): Promise<SanitizedResult> {
+  // Hard boundary: reject all image payloads from in-place manipulation
+  const fileName = file instanceof File ? file.name : '';
+  const fileMime = file.type || '';
+  if (isImageMimeType(fileMime, fileName)) {
+    throw new Error(
+      `Image payload rejected from media pipeline: MIME="${fileMime}" name="${fileName}". ` +
+      'Image assets must route exclusively through canvas re-synthesis.'
+    );
+  }
+
   onProgress?.(15);
   const originalName = file instanceof File ? file.name : 'unnamed_media';
   const auditBefore = await analyzeForensics(file, originalName);

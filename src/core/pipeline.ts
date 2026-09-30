@@ -45,17 +45,9 @@ export async function processMediaFile(
     }, onProgress);
   }
 
-  // Fallback
-  try {
-    return await sanitizeImage(file, {
-      defenseLevel,
-      outputFormat: 'image/webp',
-      quality,
-      extremeSanitization,
-    }, onProgress);
-  } catch {
-    return await sanitizeMedia(file, {
-      defenseLevel,
-    }, onProgress);
-  }
+  // No fallback: unrecognized file types are strictly rejected
+  throw new Error(
+    `Unsupported file type: MIME="${mime}" name="${name}". ` +
+    'Only image (JPEG, PNG, WebP, BMP, TIFF, GIF) and media (MP4, MOV, MKV, WebM, MP3, WAV, OGG, AAC, M4A) formats are accepted.'
+  );
 }
