@@ -7,57 +7,41 @@ export function renderSettingsPanel(
   state: SettingsState,
   onChange: (updated: Partial<SettingsState>) => void
 ): HTMLElement {
-  const panel = document.createElement('div');
-  panel.className = 'p-4 sm:p-5 mb-6 text-[#FFFFFF]';
+  const bar = document.createElement('header');
+  bar.className = 'w-full flex items-center justify-between py-6 text-[#FFFFFF] select-none';
 
-  panel.innerHTML = `
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
-      <!-- Encoder Quality -->
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-mono font-semibold uppercase tracking-wider text-[#FFFFFF]" 
-                title="Hardcoded strictly to 60% with YUV 4:2:0 Chroma Subsampling to neutralize PRNU and steganographic carriers."
-                aria-label="Encoder Quality: Hardcoded strictly to 60% with YUV 4:2:0 Chroma Subsampling to neutralize PRNU and steganographic carriers.">
-            Encoder Quality
-          </span>
-          <span id="quality-val" class="text-xs font-mono font-bold text-[#FFFFFF] px-2 py-0.5">
-            60%
-          </span>
-          <span class="text-[10px] text-[#00FF00] px-1.5 py-0.5 font-mono font-normal">
-            OPSEC Enforced
-          </span>
-        </div>
-      </div>
+  bar.innerHTML = `
+    <div class="flex items-center gap-3">
+      <span class="text-base sm:text-lg font-bold tracking-widest uppercase font-mono text-[#FFFFFF]">Dodecoder</span>
+    </div>
 
-      <!-- Extreme Sanitization Toggle -->
-      <div class="flex items-center justify-between gap-4 p-3">
-        <div class="flex items-center gap-2">
-          <label for="extreme-toggle" class="text-xs font-mono font-semibold uppercase tracking-wider text-[#FFFFFF] cursor-pointer"
-                 title="Spatial micro-resampling, 3x3 median filter, and visibility dithering against steganography."
-                 aria-label="Extreme Sanitization: Spatial micro-resampling, 3x3 median filter, and visibility dithering against steganography.">
-            Extreme Sanitization
-          </label>
-        </div>
+    <div class="flex items-center gap-6">
+      <label class="flex items-center gap-2.5 cursor-pointer"
+             title="Deep Decontamination: 3x3 median filtering, spatial micro-resampling, and noise dithering"
+             aria-label="Toggle extreme sanitization and deep decontamination">
+        <span class="text-xs font-mono uppercase tracking-wider text-[#FFFFFF]">Extreme Mode</span>
+        <input
+          id="extreme-toggle"
+          type="checkbox"
+          class="sr-only peer"
+          ${state.extremeSanitization ? 'checked' : ''}
+        />
+        <div class="w-8 h-4 bg-[#000000] outline outline-1 outline-[#FFFFFF] peer-focus-visible:outline-2 peer-focus-visible:outline-[#00FF00] peer-checked:bg-[#00FF00] peer-checked:outline-[#00FF00] relative transition-colors cursor-pointer after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#FFFFFF] after:h-2.5 after:w-2.5 after:transition-all peer-checked:after:translate-x-4 peer-checked:after:bg-[#000000]"></div>
+      </label>
 
-        <label class="relative inline-flex items-center cursor-pointer shrink-0">
-          <input
-            id="extreme-toggle"
-            type="checkbox"
-            class="sr-only peer"
-            ${state.extremeSanitization ? 'checked' : ''}
-          />
-          <div class="w-9 h-5 bg-[#000000] border-2 border-[#FFFFFF] peer-focus-visible:outline-2 peer-focus-visible:outline-[#00FF00] peer-checked:bg-[#00FF00] after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-[#FFFFFF] after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
-        </label>
-      </div>
+      <a href="https://github.com/mochilamv/dodecoder" target="_blank" rel="noopener noreferrer" 
+         class="text-xs font-mono uppercase tracking-wider text-[#FFFFFF] hover:text-[#00FF00] transition-colors focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2">
+        GitHub
+      </a>
     </div>
   `;
 
-  const extremeToggle = panel.querySelector<HTMLInputElement>('#extreme-toggle');
+  const extremeToggle = bar.querySelector<HTMLInputElement>('#extreme-toggle');
   if (extremeToggle) {
     extremeToggle.addEventListener('change', () => {
       onChange({ extremeSanitization: extremeToggle.checked });
     });
   }
 
-  return panel;
+  return bar;
 }

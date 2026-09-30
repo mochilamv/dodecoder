@@ -3,29 +3,27 @@ import { icons } from '../icons';
 export function renderDropzone(onFilesSelected: (files: File[]) => void): HTMLElement {
   const dropzone = document.createElement('div');
   dropzone.className =
-    'relative p-8 sm:p-12 text-center transition-all duration-200 group cursor-pointer overflow-hidden focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2';
+    'relative my-12 sm:my-20 py-20 sm:py-28 flex flex-col items-center justify-center text-center cursor-pointer select-none transition-all duration-150 outline outline-1 outline-[#FFFFFF]/20 hover:outline-[#FFFFFF] focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-4';
   dropzone.setAttribute('tabindex', '0');
-  dropzone.setAttribute('aria-label', 'Dropzone: Drop files here or click to browse. Batch processing for images, videos, and audio. Full pixel reconstruction and zero metadata.');
-  dropzone.setAttribute('title', 'Batch processing for images, videos, and audio. Full pixel reconstruction and zero metadata.');
+  dropzone.setAttribute('role', 'button');
+  dropzone.setAttribute('aria-label', 'Sanitization Dropzone: Drop image, video, or audio files to sanitize.');
+  dropzone.setAttribute('title', 'Supports JPEG, PNG, WebP, BMP, TIFF, MP4, MOV, MP3, WAV, OGG');
 
   dropzone.innerHTML = `
-    <!-- Hidden File Input -->
     <input type="file" id="file-input" multiple accept="image/*,video/*,audio/*,.jpg,.jpeg,.png,.webp,.bmp,.tiff,.mp4,.mov,.mp3,.wav,.ogg" class="hidden" />
 
-    <div class="relative z-10 flex flex-col items-center justify-center space-y-4">
-      <div class="w-14 h-14 flex items-center justify-center text-[#FFFFFF] transition-colors">
+    <div class="flex flex-col items-center justify-center space-y-4 pointer-events-none">
+      <div class="text-[#FFFFFF]">
         ${icons.upload}
       </div>
 
-      <div class="space-y-1">
-        <h3 class="text-base sm:text-lg font-medium text-[#FFFFFF] font-mono">
-          Drop files here or click to browse
-        </h3>
+      <div class="text-sm sm:text-base font-mono tracking-wider text-[#FFFFFF] uppercase">
+        Drop media here or browse
       </div>
 
-      <button type="button" tabindex="-1" class="mt-2 px-5 py-2 text-xs font-mono text-[#FFFFFF] transition-all">
+      <span class="text-xs font-mono text-[#FFFFFF] tracking-widest underline underline-offset-4 hover:text-[#00FF00] transition-colors">
         Select Files
-      </button>
+      </span>
     </div>
   `;
 
@@ -34,7 +32,7 @@ export function renderDropzone(onFilesSelected: (files: File[]) => void): HTMLEl
   dropzone.addEventListener('click', () => {
     input.click();
   });
-  
+
   dropzone.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
@@ -49,11 +47,9 @@ export function renderDropzone(onFilesSelected: (files: File[]) => void): HTMLEl
     }
   });
 
-  // Drag and drop events
   dropzone.addEventListener('dragover', e => {
     e.preventDefault();
     e.stopPropagation();
-    // Use focus-style color during drag over
     dropzone.style.outline = '2px solid #00FF00';
   });
 

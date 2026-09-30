@@ -18,9 +18,9 @@
   }
 
   * {
-    border-color: #000000 !important;
+    border-color: transparent !important;
     box-shadow: none !important;
-    background-image: none !important; /* Prohibit gradients */
+    background-image: none !important;
   }
 
   *:focus-visible {
@@ -30,8 +30,8 @@
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 ::-webkit-scrollbar-track {
   background: #000000;

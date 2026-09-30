@@ -28,12 +28,12 @@ export class DoDecoderApp {
     this.root.innerHTML = '';
 
     const main = document.createElement('main');
-    main.className = 'flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-10 flex flex-col gap-6';
+    main.className = 'flex-1 max-w-4xl w-full mx-auto px-4 sm:px-8 py-6 flex flex-col justify-between';
 
-    const settingsPanel = renderSettingsPanel(this.settings, updated => {
+    const header = renderSettingsPanel(this.settings, updated => {
       this.settings = { ...this.settings, ...updated };
     });
-    main.appendChild(settingsPanel);
+    main.appendChild(header);
 
     const dropzone = renderDropzone(files => this.handleFilesAdded(files));
     main.appendChild(dropzone);
@@ -54,17 +54,12 @@ export class DoDecoderApp {
 
   private createFooter(): HTMLElement {
     const footer = document.createElement('footer');
-    footer.className = 'mt-auto pt-16 pb-8 text-center text-[#FFFFFF] text-xs font-mono';
+    footer.className = 'mt-auto py-8 text-center text-[#FFFFFF]/60 text-xs font-mono select-none';
     footer.innerHTML = `
-      <div class="mb-3 space-y-1">
-        <div class="text-sm font-bold tracking-widest uppercase text-[#FFFFFF] font-mono" title="Client-Side Media Sanitization & Anti-Forensics">Dodecoder</div>
-      </div>
-      <div class="flex flex-wrap items-center justify-center gap-3 text-[11px] text-[#FFFFFF]">
-        <span>By Mochilamv & Antigravity (AI)</span>
-        <span>•</span>
+      <div class="flex flex-wrap items-center justify-center gap-4">
         <span>MIT License</span>
         <span>•</span>
-        <button id="footer-legal-btn" class="text-[#FFFFFF] hover:text-[#00FF00] cursor-pointer focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2">
+        <button id="footer-legal-btn" class="hover:text-[#FFFFFF] underline cursor-pointer focus-visible:outline-2 focus-visible:outline-[#00FF00]">
           Licenses & Legal
         </button>
       </div>
