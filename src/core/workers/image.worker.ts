@@ -1,5 +1,5 @@
 import { applyPrnuDefense } from '../image/prnu-defense';
-import { applyDeepDecontamination, applyYuv420ChromaSubsampling } from '../image/decontamination';
+import { applyDeepDecontamination } from '../image/decontamination';
 import { stripDisplayColorProfiles } from '../image/icc-sanitizer';
 
 self.onmessage = async (event: MessageEvent) => {
@@ -43,14 +43,8 @@ self.onmessage = async (event: MessageEvent) => {
     
     bitmap.close();
 
-    // Decontamination
-    if (options.extremeSanitization) {
-      applyDeepDecontamination(targetCanvas, needsAlpha);
-    } else {
-      const imgData = ctx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
-      applyYuv420ChromaSubsampling(imgData.data, targetCanvas.width, targetCanvas.height);
-      ctx.putImageData(imgData, 0, 0);
-    }
+    // Mandatory unconditional deep decontamination
+    applyDeepDecontamination(targetCanvas, needsAlpha);
 
     // Encoding Pipeline
     const effectiveMime = 'image/webp';

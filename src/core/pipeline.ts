@@ -24,7 +24,7 @@ export async function processMediaFile(
   // Always enforce maximum protection
   const defenseLevel: DefenseLevel = options.defenseLevel || 'paranoid';
   const quality = options.quality ?? 0.85;
-  const extremeSanitization = options.extremeSanitization ?? false;
+  const extremeSanitization = true;
 
   const isImage = mime.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp|gif|tiff)$/i.test(name);
   const isVideoOrAudio = mime.startsWith('video/') || mime.startsWith('audio/') || /\.(mp4|mov|mkv|webm|mp3|wav|ogg|aac|m4a)$/i.test(name);

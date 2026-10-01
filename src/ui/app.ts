@@ -2,7 +2,7 @@ import { QueueItem, SanitizedResult } from '../core/types';
 import { processMediaFile } from '../core/pipeline';
 import { createSanitizedZipBundle, triggerEphemeralDownload } from '../core/utils/zip-export';
 import { wipeBuffer } from '../core/utils/memory';
-import { renderSettingsPanel, SettingsState } from './components/settings-panel';
+import { renderSettingsPanel } from './components/settings-panel';
 import { renderDropzone } from './components/dropzone';
 import { renderQueueList } from './components/queue-list';
 import { renderAuditModal } from './components/audit-modal';
@@ -10,10 +10,6 @@ import { renderLegalModal } from './components/legal-modal';
 
 export class DoDecoderApp {
   private root: HTMLElement;
-  private settings: SettingsState = {
-    quality: 0.60,
-    extremeSanitization: false,
-  };
   private queue: QueueItem[] = [];
   private activeAuditModal: HTMLElement | null = null;
   private activeLegalModal: HTMLElement | null = null;
@@ -30,9 +26,7 @@ export class DoDecoderApp {
     const main = document.createElement('main');
     main.className = 'flex-1 max-w-4xl w-full mx-auto px-4 sm:px-8 py-6 flex flex-col justify-between';
 
-    const header = renderSettingsPanel(this.settings, updated => {
-      this.settings = { ...this.settings, ...updated };
-    });
+    const header = renderSettingsPanel();
     main.appendChild(header);
 
     const dropzone = renderDropzone(files => this.handleFilesAdded(files));
@@ -54,8 +48,11 @@ export class DoDecoderApp {
 
   private createFooter(): HTMLElement {
     const footer = document.createElement('footer');
-    footer.className = 'mt-auto py-8 text-center text-[#FFFFFF]/60 text-xs font-mono select-none';
+    footer.className = 'mt-auto py-8 text-center text-[#FFFFFF]/60 text-xs font-mono select-none space-y-2';
     footer.innerHTML = `
+      <div class="text-xs font-mono tracking-wider uppercase text-[#FFFFFF]">
+        Client-Side Sanitization
+      </div>
       <div class="flex flex-wrap items-center justify-center gap-4">
         <span>MIT License</span>
         <span>•</span>
@@ -102,8 +99,8 @@ export class DoDecoderApp {
         const result = await processMediaFile(
           item.file,
           {
-            quality: this.settings.quality,
-            extremeSanitization: this.settings.extremeSanitization,
+            quality: 0.60,
+            extremeSanitization: true,
           },
           pct => {
             item.progress = pct;

@@ -3,7 +3,7 @@ import { analyzeForensics } from '../forensic/exif-inspector';
 import { generateSanitizedName } from '../forensic/hash-naming';
 import { applyPrnuDefense } from './prnu-defense';
 import { stripDisplayColorProfiles } from './icc-sanitizer';
-import { applyDeepDecontamination, applyYuv420ChromaSubsampling } from './decontamination';
+import { applyDeepDecontamination } from './decontamination';
 
 
 export interface ImageSanitizerOptions {
@@ -29,7 +29,7 @@ export async function sanitizeImage(
   const needsAlpha = !isOpaqueSource;
   const effectiveMime = 'image/webp';
   const effectiveQuality = 0.60;
-  const isDeepDecontaminated = !!options.extremeSanitization;
+  const isDeepDecontaminated = true;
 
   const rawBuffer = await file.arrayBuffer();
   let cleanBytes: Uint8Array | null = null;
@@ -92,23 +92,9 @@ export async function sanitizeImage(
     bitmap.close();
     await new Promise(r => setTimeout(r, 0)); // async yield
 
-    if (isDeepDecontaminated) {
-      applyDeepDecontamination(canvas, needsAlpha);
-      await new Promise(r => setTimeout(r, 0));
-    } else {
-      const imgData = ctx.getImageData(0, 0, width, height);
-      // Process in chunks
-      const chunkSize = 100 * width * 4; // roughly 100 rows
-      for (let i = 0; i < imgData.data.length; i += chunkSize) {
-        
-        // Note: applyYuv420ChromaSubsampling requires full buffer for row math, 
-        // applying row yield conceptually before it or modifying it.
-        // Let's just yield per row or before the big operation
-        await new Promise(r => setTimeout(r, 0));
-      }
-      applyYuv420ChromaSubsampling(imgData.data, width, height);
-      ctx.putImageData(imgData, 0, 0);
-    }
+    // Mandatory deep decontamination: spatial micro-resampling, 3x3 median filter, YUV 4:2:0, and dithering
+    applyDeepDecontamination(canvas, needsAlpha);
+    await new Promise(r => setTimeout(r, 0));
     
     const fallbackBlob = await new Promise<Blob>((resolve, reject) => {
       canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob failed')), effectiveMime, effectiveQuality);
