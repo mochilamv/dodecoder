@@ -30,11 +30,12 @@ export async function processMediaFile(
   const isVideoOrAudio = mime.startsWith('video/') || mime.startsWith('audio/') || /\.(mp4|mov|mkv|webm|mp3|wav|ogg|aac|m4a)$/i.test(name);
 
   if (isImage) {
-    // Re-encode strictly using VP8 or VP8L WebP container
+    const isLossless = mime === 'image/png' || name.toLowerCase().endsWith('.png');
+    const outputFormat = isLossless ? 'image/png' : 'image/webp';
     return await sanitizeImage(file, {
       defenseLevel,
-      outputFormat: 'image/webp',
-      quality,
+      outputFormat,
+      quality: isLossless ? undefined : quality,
       extremeSanitization,
     }, onProgress);
   }

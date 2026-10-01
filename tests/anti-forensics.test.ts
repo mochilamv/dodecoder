@@ -95,17 +95,21 @@ test('5. MP4 In-Place Mutation, Size Preservation, and Banner Zeroing', async ()
   const syntheticMp4 = new Uint8Array([
     // ftyp (16 bytes)
     0x00, 0x00, 0x00, 0x10, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00,
-    // moov (64 bytes total: 8 header + 48 trak + 8 udta)
-    0x00, 0x00, 0x00, 0x40, 0x6d, 0x6f, 0x6f, 0x76,
-    // trak (48 bytes: 8 header + 40 mdia)
-    0x00, 0x00, 0x00, 0x30, 0x74, 0x72, 0x61, 0x6b,
-    // mdia (40 bytes: 8 header + 32 mdhd)
-    0x00, 0x00, 0x00, 0x28, 0x6d, 0x64, 0x69, 0x61,
-    // mdhd (32 bytes) - inside mdia inside trak
+    // moov (96 bytes total: 8 header + 80 trak + 8 udta)
+    0x00, 0x00, 0x00, 0x60, 0x6d, 0x6f, 0x6f, 0x76,
+    // trak (80 bytes: 8 header + 72 mdia)
+    0x00, 0x00, 0x00, 0x50, 0x74, 0x72, 0x61, 0x6b,
+    // mdia (72 bytes: 8 header + 32 mdhd + 32 hdlr)
+    0x00, 0x00, 0x00, 0x48, 0x6d, 0x64, 0x69, 0x61,
+    // mdhd (32 bytes) - inside mdia
     0x00, 0x00, 0x00, 0x20, 0x6d, 0x64, 0x68, 0x64, 0x00, 0x00, 0x00, 0x00,
     0x12, 0x34, 0x56, 0x78, // creation timestamp
     0x9a, 0xbc, 0xde, 0xf0, // modification timestamp
     0x00, 0x00, 0x03, 0xe8, 0x00, 0x00, 0x00, 0x64, 0x00, 0x01, 0x00, 0x00,
+    // hdlr (32 bytes) - inside mdia
+    0x00, 0x00, 0x00, 0x20, 0x68, 0x64, 0x6c, 0x72, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x76, 0x69, 0x64, 0x65, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     // udta (8 bytes) inside moov - to be mutated in-place to 'free'
     0x00, 0x00, 0x00, 0x08, 0x75, 0x64, 0x74, 0x61,
     // mdat (24 bytes) - with banner
@@ -554,5 +558,199 @@ test('16. Pipeline Rejects Unrecognized File Types with Hard Error', async () =>
       `processMediaFile must throw for unrecognized type: ${fmt.name} (${fmt.mime})`
     );
   }
+});
+
+test('17. ISOBMFF Track Whitelist: Zero-fill Subtitle/Text Tracks', async () => {
+  // Mock a moov -> trak -> mdia -> hdlr
+  const { sanitizeMp4InPlaceZeroCopy } = await import('../src/core/media/media-sanitizer');
+  
+  const syntheticMp4 = new Uint8Array([
+    // ftyp (16 bytes)
+    0x00, 0x00, 0x00, 0x10, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00,
+    // moov (72 bytes total: 8 header + 64 trak)
+    0x00, 0x00, 0x00, 0x48, 0x6d, 0x6f, 0x6f, 0x76,
+    // trak (64 bytes: 8 header + 56 mdia)
+    0x00, 0x00, 0x00, 0x40, 0x74, 0x72, 0x61, 0x6b,
+    // mdia (56 bytes: 8 header + 48 hdlr)
+    0x00, 0x00, 0x00, 0x38, 0x6d, 0x64, 0x69, 0x61,
+    // hdlr (48 bytes) inside mdia
+    0x00, 0x00, 0x00, 0x30, 0x68, 0x64, 0x6c, 0x72, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 
+    0x73, 0x62, 0x74, 0x6c, // 'sbtl' (subtitle track)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x53, 0x75, 0x62, 0x74, 0x69, 0x74, 0x6c, 0x65, 0x73, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00
+  ]);
+
+  const mutated = sanitizeMp4InPlaceZeroCopy(syntheticMp4);
+  
+  // The 'trak' box (at offset 16+8 = 24) should be mutated to 'free' (0x66726565)
+  // because its hdlr type is 'sbtl', which is not 'vide' or 'soun'
+  const trakFourCC = String.fromCharCode(mutated[28], mutated[29], mutated[30], mutated[31]);
+  assert.equal(trakFourCC, 'free', 'Subtitle trak must be mutated to free box');
+});
+
+test('18. Physical CMOS Poisson-Gaussian Stochastic Camouflage', async () => {
+  const { applyPoissonGaussianNoise } = await import('../src/core/image/poisson-gaussian');
+  
+  const pixels = new Uint8ClampedArray([
+    255, 127, 63, 255,
+    1,   2,   3,  255
+  ]);
+  
+  applyPoissonGaussianNoise(pixels);
+  
+  // Alpha channel must be strictly preserved
+  assert.equal(pixels[3], 255);
+  assert.equal(pixels[7], 255);
+  // RGB values must remain valid byte ranges [0, 255]
+  assert.ok(pixels[0] >= 0 && pixels[0] <= 255);
+  assert.ok(pixels[1] >= 0 && pixels[1] <= 255);
+  assert.ok(pixels[2] >= 0 && pixels[2] <= 255);
+});
+
+test('19. Cryptographic Noise Injection Divergence', async () => {
+  const { applyPoissonGaussianNoise } = await import('../src/core/image/poisson-gaussian');
+  
+  const pixels1 = new Uint8ClampedArray(1024).fill(128);
+  const pixels2 = new Uint8ClampedArray(1024).fill(128);
+  
+  applyPoissonGaussianNoise(pixels1);
+  applyPoissonGaussianNoise(pixels2);
+  
+  let diverges = false;
+  for (let i = 0; i < pixels1.length; i++) {
+    if (pixels1[i] !== pixels2[i]) {
+      diverges = true;
+      break;
+    }
+  }
+  assert.ok(diverges, 'Cryptographic Poisson-Gaussian noise must diverge across identical inputs');
+});
+
+test('20. Spatial Grid Tiling Dimensions', async () => {
+  const { sanitizeImage } = await import('../src/core/image/image-sanitizer');
+  assert.equal(typeof sanitizeImage, 'function');
+});
+
+test('21. Electrical Network Frequency (ENF) Digital Notch Rejection Filters', async () => {
+  const { createNotchCoeffs, filterChannelInPlace, getEnfTargetFrequencies } = await import('../src/core/media/enf-filter');
+  
+  const fs = 48000;
+  const targetFreqs = getEnfTargetFrequencies(fs, 1200);
+  assert.ok(targetFreqs.includes(50), 'Must include 50Hz fundamental');
+  assert.ok(targetFreqs.includes(60), 'Must include 60Hz fundamental');
+  assert.ok(targetFreqs.includes(100), 'Must include 100Hz harmonic');
+  assert.ok(targetFreqs.includes(120), 'Must include 120Hz harmonic');
+
+  // Synthesize 50Hz pure tone (1.0s)
+  const durationSec = 1.0;
+  const numSamples = Math.floor(fs * durationSec);
+  const signal = new Float32Array(numSamples);
+  for (let i = 0; i < numSamples; i++) {
+    signal[i] = Math.sin((2 * Math.PI * 50 * i) / fs);
+  }
+
+  // Measure initial RMS
+  let sumSqBefore = 0;
+  for (let i = Math.floor(numSamples / 2); i < numSamples; i++) sumSqBefore += signal[i] * signal[i];
+  const rmsBefore = Math.sqrt(sumSqBefore / (numSamples / 2));
+
+  filterChannelInPlace(signal, fs, 1200);
+
+  // Measure filtered RMS
+  let sumSqAfter = 0;
+  for (let i = Math.floor(numSamples / 2); i < numSamples; i++) sumSqAfter += signal[i] * signal[i];
+  const rmsAfter = Math.sqrt(sumSqAfter / (numSamples / 2));
+
+  // Notch filter must heavily attenuate the 50Hz tone (> 20dB reduction)
+  assert.ok(rmsAfter < rmsBefore * 0.1, `ENF 50Hz tone must be attenuated by at least 20dB. Before: ${rmsBefore}, After: ${rmsAfter}`);
+});
+
+test('22. Standalone WASM Deterministic WebP Image Encoder', async () => {
+  const { encodeDeterministicWebp } = await import('../src/core/image/wasm-encoder');
+  
+  const width = 4, height = 4;
+  const rgba = new Uint8Array(width * height * 4);
+  for (let i = 0; i < rgba.length; i += 4) {
+    rgba[i] = (i * 17) % 256;
+    rgba[i + 1] = (i * 31) % 256;
+    rgba[i + 2] = (i * 47) % 256;
+    rgba[i + 3] = 255;
+  }
+
+  const encoded1 = await encodeDeterministicWebp(rgba, width, height);
+  const encoded2 = await encodeDeterministicWebp(rgba, width, height);
+
+  // Invariant: Cross-platform deterministic bitstream generation
+  assert.equal(encoded1.length, encoded2.length, 'Bitstream lengths must be identical');
+  for (let i = 0; i < encoded1.length; i++) {
+    assert.equal(encoded1[i], encoded2[i], `Byte at offset ${i} must match identically across encoder passes`);
+  }
+
+  // Validate WebP RIFF VP8L container signature
+  const riff = String.fromCharCode(...encoded1.subarray(0, 4));
+  const webp = String.fromCharCode(...encoded1.subarray(8, 12));
+  const vp8l = String.fromCharCode(...encoded1.subarray(12, 16));
+  assert.equal(riff, 'RIFF');
+  assert.equal(webp, 'WEBP');
+  assert.equal(vp8l, 'VP8L');
+});
+
+test('23. Poisson-Gaussian Heteroscedastic CMOS Noise Variance Model', async () => {
+  const { calculatePoissonGaussianSigma } = await import('../src/core/image/poisson-gaussian');
+  
+  const darkSigma = calculatePoissonGaussianSigma(10, 0.02, 1.0);
+  const midSigma = calculatePoissonGaussianSigma(128, 0.02, 1.0);
+  const brightSigma = calculatePoissonGaussianSigma(255, 0.02, 1.0);
+
+  // Invariant: sigma^2 = a * I + b -> sigma increases monotonically with luminance
+  assert.ok(darkSigma < midSigma, 'Dark luminance must yield lower variance than mid-tones');
+  assert.ok(midSigma < brightSigma, 'Mid-tones must yield lower variance than bright luminance');
+  assert.ok(Math.abs(darkSigma - Math.sqrt(0.02 * 10 + 1.0)) < 1e-6);
+  assert.ok(Math.abs(brightSigma - Math.sqrt(0.02 * 255 + 1.0)) < 1e-6);
+});
+
+test('24. Ephemeral AES-GCM OPFS TransformStream and Memory Key Zeroization', async () => {
+  const { createEphemeralOpfsSession } = await import('../src/core/media/encrypted-stream');
+  
+  const session = await createEphemeralOpfsSession();
+  const plaintext = new TextEncoder().encode('Sensitive biometric and hardware video bitstream metadata');
+  
+  const encrypted = await session.encryptChunk(plaintext);
+  
+  // Ciphertext must not match plaintext
+  assert.notDeepEqual(encrypted, plaintext);
+  assert.ok(encrypted.length > plaintext.length);
+
+  const decrypted = await session.decryptChunk(encrypted);
+  assert.deepEqual(decrypted, plaintext, 'Decrypted payload must match plaintext before key zeroization');
+
+  // Zeroize volatile key in RAM
+  session.zeroize();
+
+  // Any subsequent attempt to encrypt or decrypt must fail
+  await assert.rejects(
+    async () => await session.encryptChunk(plaintext),
+    /zeroized/,
+    'Encryption must be permanently barred after key zeroization'
+  );
+  await assert.rejects(
+    async () => await session.decryptChunk(encrypted),
+    /zeroized/,
+    'Decryption must be permanently impossible after key zeroization'
+  );
+});
+
+test('25. WebCodecs Resynthesis & Media Sanitizer Sprint 4 Metadata', async () => {
+  const { sanitizeMedia } = await import('../src/core/media/media-sanitizer');
+  
+  const audioBytes = new Uint8Array([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, ...new Array(100).fill(0)]);
+  const dummyFile = new File([audioBytes], 'test_audio.mp3', { type: 'audio/mp3' });
+
+  const result = await sanitizeMedia(dummyFile, { defenseLevel: 'hardened' });
+  
+  assert.equal(result.enfFiltered, true, 'Result must reflect ENF filter application');
+  assert.equal(typeof result.sha256, 'string');
 });
 

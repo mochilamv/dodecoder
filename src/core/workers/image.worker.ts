@@ -1,77 +1,69 @@
 import { applyPrnuDefense } from '../image/prnu-defense';
 import { applyDeepDecontamination } from '../image/decontamination';
 import { stripDisplayColorProfiles } from '../image/icc-sanitizer';
+import { applyPoissonGaussianNoise } from '../image/poisson-gaussian';
+import { encodeDeterministicWebp } from '../image/wasm-encoder';
+
+const TILE_SIZE = 2048;
 
 self.onmessage = async (event: MessageEvent) => {
   const { buffer, mimeType, options, needsAlpha } = event.data;
-  
+
   try {
     const blob = new Blob([buffer], { type: mimeType });
-    const bitmap = await createImageBitmap(blob);
 
-    let width = bitmap.width;
-    let height = bitmap.height;
-    
-    // Resolution throttling: max edge strictly 1920px with proportional scale
-    const maxEdge = Math.max(width, height);
-    let sourceSource: ImageBitmap | OffscreenCanvas = bitmap;
-    
-    if (maxEdge > 1920) {
-      const scale = 1920 / maxEdge;
-      width = Math.floor(width * scale);
-      height = Math.floor(height * scale);
-      
-      const downscaleCanvas = new OffscreenCanvas(width, height);
-      const dsCtx = downscaleCanvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
-      dsCtx.drawImage(bitmap, 0, 0, width, height);
-      sourceSource = downscaleCanvas;
-    }
+    const metaBitmap = await createImageBitmap(blob);
+    const width = metaBitmap.width;
+    const height = metaBitmap.height;
+    metaBitmap.close();
 
-    // Isolate inside Web Worker using OffscreenCanvas
-    const targetCanvas = new OffscreenCanvas(width, height);
-    
-    // Test runtime 2D context instantiation directly inside Web Worker environment.
-    // Strip alpha if opaque media to prevent ALPH / VP8X injection
-    const ctx = targetCanvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true }) as OffscreenCanvasRenderingContext2D | null;
-    if (!ctx) {
-      throw new Error('WORKER_CONTEXT_FAILED');
-    }
+    const cols = Math.ceil(width / TILE_SIZE);
+    const rows = Math.ceil(height / TILE_SIZE);
+    const totalTiles = cols * rows;
 
-    // Unconditional affine perturbation
-    const prnuLevel = options.defenseLevel === 'standard' ? 'hardened' : options.defenseLevel;
-    applyPrnuDefense(sourceSource as any, targetCanvas, prnuLevel, needsAlpha, false);
-    
-    bitmap.close();
+    const outCanvas = new OffscreenCanvas(width, height);
+    const outCtx = outCanvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+    if (!outCtx) throw new Error('WORKER_CONTEXT_FAILED');
 
-    // Mandatory unconditional deep decontamination
-    applyDeepDecontamination(targetCanvas, needsAlpha);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const sx = c * TILE_SIZE;
+        const sy = r * TILE_SIZE;
+        const sw = Math.min(TILE_SIZE, width - sx);
+        const sh = Math.min(TILE_SIZE, height - sy);
 
-    // Encoding Pipeline
-    const effectiveMime = 'image/webp';
-    const effectiveQuality = 0.60;
-    const rawBlob = await targetCanvas.convertToBlob({ type: effectiveMime, quality: effectiveQuality });
+        const tileBitmap = await createImageBitmap(blob, sx, sy, sw, sh);
 
-    // Inspect RIFF Header
-    const rawBuffer = await rawBlob.arrayBuffer();
-    const rawBytes = new Uint8Array(rawBuffer);
-    
-    if (!needsAlpha && rawBytes.length >= 16) {
-      const fourCC = String.fromCharCode(rawBytes[12], rawBytes[13], rawBytes[14], rawBytes[15]);
-      if (fourCC === 'VP8X') {
-        console.warn('Residual extended chunks detected: FourCC equals VP8X on intended non-transparent media.');
+        const tileCanvas = new OffscreenCanvas(sw, sh);
+        const tileCtx = tileCanvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+
+        const prnuLevel = options.defenseLevel === 'standard' ? 'hardened' : options.defenseLevel;
+        applyPrnuDefense(tileBitmap as any, tileCanvas, prnuLevel, needsAlpha, false);
+        tileBitmap.close();
+
+        applyDeepDecontamination(tileCanvas, needsAlpha);
+
+        const imgData = tileCtx.getImageData(0, 0, sw, sh);
+        applyPoissonGaussianNoise(imgData.data);
+        tileCtx.putImageData(imgData, 0, 0);
+
+        outCtx.drawImage(tileCanvas, sx, sy);
       }
     }
 
-    // Zero-copy ICC strip
-    const cleanBytes = stripDisplayColorProfiles(rawBytes, effectiveMime);
-    
-    // Transfer back
-    const resultBuffer = cleanBytes.buffer;
-    (self as any).postMessage(
-      { buffer: resultBuffer },
-      [resultBuffer]
+    const finalImgData = outCtx.getImageData(0, 0, width, height);
+    const rawEncoded = await encodeDeterministicWebp(finalImgData.data, width, height);
+    const cleanBytes = stripDisplayColorProfiles(rawEncoded, 'image/webp');
+
+    const resultBuffer = cleanBytes.buffer.slice(
+      cleanBytes.byteOffset,
+      cleanBytes.byteOffset + cleanBytes.byteLength
     );
 
+    (self as any).postMessage(
+      { buffer: resultBuffer, tilesProcessed: totalTiles, wasmEncoded: true },
+      [resultBuffer]
+    );
   } catch (err: any) {
     (self as any).postMessage({ error: err.message || 'Worker processing failed' });
   }

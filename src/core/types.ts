@@ -52,6 +52,11 @@ export interface SanitizedResult {
   processedAt: number;
   isDeepDecontaminated?: boolean;
   extremeSanitization?: boolean;
+  tilesProcessed?: number;
+  enfFiltered?: boolean;
+  wasmEncoded?: boolean;
+  opfsEncrypted?: boolean;
+  webcodecsResynthesized?: boolean;
 }
 
 export interface QueueItem {

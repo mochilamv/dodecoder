@@ -1,22 +1,17 @@
 import { DefenseLevel, SanitizedResult } from '../types';
 import { analyzeForensics } from '../forensic/exif-inspector';
 import { generateSanitizedName } from '../forensic/hash-naming';
+import { isWebCodecsSupported, resynthesizeMediaWebCodecs } from './webcodecs-resynthesizer';
+import { createEphemeralOpfsSession } from './encrypted-stream';
 
 export interface MediaSanitizerOptions {
   defenseLevel: DefenseLevel;
 }
 
-/**
- * Image MIME Type Guard
- * Hard boundary: all image formats are strictly rejected from the in-place
- * structural manipulation pipeline to enforce mandatory canvas re-synthesis routing.
- */
 export function isImageMimeType(mimeType: string, name: string): boolean {
   return mimeType.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp|gif|tiff|tif|avif|heic|heif|svg)$/i.test(name);
 }
 
-
-// FourCC Integer constants for branchless matching
 export const FOURCC_FTYP = 0x66747970;
 export const FOURCC_MOOV = 0x6d6f6f76;
 export const FOURCC_MVHD = 0x6d766864;
@@ -27,7 +22,15 @@ export const FOURCC_META = 0x6d657461;
 export const FOURCC_ILST = 0x696c7374;
 export const FOURCC_UUID = 0x75756964;
 export const FOURCC_MDAT = 0x6d646174;
-export const FOURCC_FREE = 0x66726565; // 'free' padding atom
+export const FOURCC_FREE = 0x66726565; 
+
+// Sub-boxes for tracking hdlr
+export const FOURCC_TRAK = 0x7472616b;
+export const FOURCC_MDIA = 0x6d646961;
+export const FOURCC_MINF = 0x6d696e66;
+export const FOURCC_STBL = 0x7374626c;
+export const FOURCC_DINF = 0x64696e66;
+export const FOURCC_HDLR = 0x68646c72;
 
 export function isMp4OrMov(bytes: Uint8Array): boolean {
   if (bytes.length < 12) return false;
@@ -40,95 +43,9 @@ export function isAudioFile(mimeType: string, name: string): boolean {
   return mimeType.startsWith('audio/') || /\.(mp3|wav|ogg|flac|aac|m4a)$/i.test(name);
 }
 
-/**
- * In-place mutation of ISOBMFF containers.
- * Maintains original file size absolutely to preserve stco and co64 frame pointers.
- * Overwrites target metadata atoms (udta, uuid, meta, ilst) with 'free' (0x66726565) and zeroes payload.
- */
-export function sanitizeMp4InPlaceZeroCopy(input: Uint8Array): Uint8Array {
-  const output = new Uint8Array(input.length);
-  output.set(input);
-  const view = new DataView(output.buffer, output.byteOffset, output.byteLength);
-
-  sanitizeBoxListInPlace(output, view, 0, output.length);
-  return output;
-}
-
-function sanitizeBoxListInPlace(
-  bytes: Uint8Array,
-  view: DataView,
-  start: number,
-  end: number
-): void {
-  let offset = start;
-
-  while (offset + 8 <= end) {
-    const boxSize = view.getUint32(offset, false);
-    const boxType = view.getUint32(offset + 4, false);
-
-    let actualSize = boxSize;
-    let headerSize = 8;
-
-    if (boxSize === 0) {
-      actualSize = end - offset;
-    } else if (boxSize === 1) {
-      if (offset + 16 > end) break;
-      actualSize = Number(view.getBigUint64(offset + 8, false));
-      headerSize = 16;
-    }
-
-    if (actualSize < headerSize || offset + actualSize > end) break;
-
-    // Target proprietary metadata blocks -> mutate in-place to 'free' and zero payload
-    const isMetadata =
-      boxType === FOURCC_UDTA ||
-      boxType === FOURCC_META ||
-      boxType === FOURCC_UUID ||
-      boxType === FOURCC_ILST;
-
-    if (isMetadata) {
-      view.setUint32(offset + 4, FOURCC_FREE, false);
-      bytes.fill(0, offset + headerSize, offset + actualSize);
-      offset += actualSize;
-      continue;
-    }
-
-    // Container boxes -> recurse inside
-    const isContainer =
-      boxType === FOURCC_MOOV ||
-      boxType === 0x7472616b /* trak */ ||
-      boxType === 0x6d646961 /* mdia */ ||
-      boxType === 0x6d696e66 /* minf */ ||
-      boxType === 0x7374626c /* stbl */ ||
-      boxType === 0x64696e66 /* dinf */;
-
-    if (isContainer) {
-      sanitizeBoxListInPlace(bytes, view, offset + headerSize, offset + actualSize);
-    } else if (boxType === FOURCC_MDAT) {
-      // In-place zeroing of encoder banners like 'x264 - core'
-      sanitizeMdatInPlace(bytes, offset + headerSize, offset + actualSize);
-    } else if (
-      (boxType === FOURCC_MVHD || boxType === FOURCC_TKHD || boxType === FOURCC_MDHD) &&
-      actualSize >= headerSize + 20
-    ) {
-      // Zero out creation and modification timestamps in-place
-      const version = bytes[offset + headerSize];
-      if (version === 0) {
-        view.setUint32(offset + headerSize + 4, 0, false);
-        view.setUint32(offset + headerSize + 8, 0, false);
-      } else if (version === 1 && actualSize >= headerSize + 28) {
-        view.setBigUint64(offset + headerSize + 4, 0n, false);
-        view.setBigUint64(offset + headerSize + 12, 0n, false);
-      }
-    }
-
-    offset += actualSize;
-  }
-}
-
-function sanitizeMdatInPlace(bytes: Uint8Array, start: number, end: number): void {
+function sanitizeMdatInPlace(bytes: Uint8Array): void {
   const banner = new TextEncoder().encode('x264 - core');
-  for (let i = start; i <= end - banner.length; i++) {
+  for (let i = 0; i <= bytes.length - banner.length; i++) {
     let match = true;
     for (let j = 0; j < banner.length; j++) {
       if (bytes[i + j] !== banner[j]) {
@@ -137,16 +54,13 @@ function sanitizeMdatInPlace(bytes: Uint8Array, start: number, end: number): voi
       }
     }
     if (match) {
-      for (let k = 0; k < 256 && i + k < end; k++) {
+      for (let k = 0; k < 256 && i + k < bytes.length; k++) {
         bytes[i + k] = 0;
       }
     }
   }
 }
 
-/**
- * Zero-copy ID3 header stripping
- */
 export function sanitizeAudioHeadersZeroCopy(bytes: Uint8Array): Uint8Array {
   let startOffset = 0;
   let endOffset = bytes.length;
@@ -162,7 +76,7 @@ export function sanitizeAudioHeadersZeroCopy(bytes: Uint8Array): Uint8Array {
 
   if (bytes.length >= 128) {
     const tagIdx = bytes.length - 128;
-    if (bytes[tagIdx] === 0x54 && bytes[tagIdx + 1] === 0x41 && bytes[tagIdx + 2] === 0x47) {
+    if (bytes[tagIdx] === 0x54 && bytes[tagIdx + 1] === 0x41 && bytes[tagIdx + 2] === 0x37) {
       endOffset = tagIdx;
     }
   }
@@ -170,21 +84,13 @@ export function sanitizeAudioHeadersZeroCopy(bytes: Uint8Array): Uint8Array {
   return bytes.subarray(startOffset, endOffset);
 }
 
-/**
- * Offloads structural media processing to a Web Worker via Transferable Objects.
- * Falls back to synchronous execution when Worker is undefined (Node.js test environment).
- */
 export async function sanitizeMediaWithWorker(
   buffer: ArrayBuffer,
   mimeType: string,
   originalName: string
 ): Promise<Uint8Array> {
-  // Hard boundary: reject all image payloads from in-place manipulation
   if (isImageMimeType(mimeType, originalName)) {
-    throw new Error(
-      `Image payload rejected from media pipeline: MIME="${mimeType}" name="${originalName}". ` +
-      'Image assets must route exclusively through canvas re-synthesis.'
-    );
+    throw new Error('Image payload rejected from media pipeline.');
   }
 
   if (typeof Worker !== 'undefined') {
@@ -194,57 +100,139 @@ export async function sanitizeMediaWithWorker(
           new URL('../workers/media.worker.ts', import.meta.url),
           { type: 'module' }
         );
-
         worker.onmessage = (e: MessageEvent<{ buffer: ArrayBuffer }>) => {
           const result = new Uint8Array(e.data.buffer);
           worker.terminate();
           resolve(result);
         };
-
-        worker.onerror = err => {
-          worker.terminate();
-          reject(err);
-        };
-
-        // Zero-copy transfer of input buffer to Worker
+        worker.onerror = err => { worker.terminate(); reject(err); };
         worker.postMessage({ buffer, mimeType, originalName }, [buffer]);
       } catch {
         const bytes = new Uint8Array(buffer);
-        const res = isMp4OrMov(bytes)
-          ? sanitizeMp4InPlaceZeroCopy(bytes)
-          : isAudioFile(mimeType, originalName)
-          ? sanitizeAudioHeadersZeroCopy(bytes)
-          : bytes;
-        resolve(res);
+        resolve(isMp4OrMov(bytes) ? sanitizeMp4InPlaceZeroCopy(bytes) : isAudioFile(mimeType, originalName) ? sanitizeAudioHeadersZeroCopy(bytes) : bytes);
       }
     });
   }
 
   const bytes = new Uint8Array(buffer);
-  if (isMp4OrMov(bytes)) {
-    return sanitizeMp4InPlaceZeroCopy(bytes);
-  } else if (isAudioFile(mimeType, originalName)) {
-    return sanitizeAudioHeadersZeroCopy(bytes);
-  }
+  if (isMp4OrMov(bytes)) return sanitizeMp4InPlaceZeroCopy(bytes);
+  else if (isAudioFile(mimeType, originalName)) return sanitizeAudioHeadersZeroCopy(bytes);
   return bytes;
 }
 
-/**
- * Client-Side Video & Audio Anti-Forensic Sanitizer
- */
+export function sanitizeMp4InPlaceZeroCopy(input: Uint8Array): Uint8Array {
+  const output = new Uint8Array(input.length);
+  output.set(input);
+  const view = new DataView(output.buffer, output.byteOffset, output.byteLength);
+  sanitizeBoxListInPlace(output, view, 0, output.length);
+  return output;
+}
+
+function sanitizeBoxListInPlace(bytes: Uint8Array, view: DataView, start: number, end: number): void {
+  let offset = start;
+  while (offset + 8 <= end) {
+    const boxSize = view.getUint32(offset, false);
+    const boxType = view.getUint32(offset + 4, false);
+    let actualSize = boxSize;
+    let headerSize = 8;
+
+    if (boxSize === 0) actualSize = end - offset;
+    else if (boxSize === 1) {
+      if (offset + 16 > end) break;
+      actualSize = Number(view.getBigUint64(offset + 8, false));
+      headerSize = 16;
+    }
+
+    if (actualSize < headerSize || offset + actualSize > end) break;
+
+    const isMetadata = boxType === FOURCC_UDTA || boxType === FOURCC_META || boxType === FOURCC_UUID || boxType === FOURCC_ILST;
+    
+    if (isMetadata) {
+      view.setUint32(offset + 4, FOURCC_FREE, false);
+      bytes.fill(0, offset + headerSize, offset + actualSize);
+      offset += actualSize;
+      continue;
+    }
+
+    if (boxType === FOURCC_TRAK) {
+      const isAllowed = checkTrakHandlerAllowed(view, offset + headerSize, offset + actualSize);
+      if (!isAllowed) {
+        view.setUint32(offset + 4, FOURCC_FREE, false);
+        bytes.fill(0, offset + headerSize, offset + actualSize);
+        offset += actualSize;
+        continue;
+      }
+    }
+
+    const isContainer = boxType === FOURCC_MOOV || boxType === FOURCC_TRAK || boxType === FOURCC_MDIA || boxType === FOURCC_MINF || boxType === FOURCC_STBL || boxType === FOURCC_DINF;
+    if (isContainer) {
+      sanitizeBoxListInPlace(bytes, view, offset + headerSize, offset + actualSize);
+    } else if (boxType === FOURCC_MDAT) {
+      sanitizeMdatInPlace(bytes.subarray(offset + headerSize, offset + actualSize));
+    } else if ((boxType === FOURCC_MVHD || boxType === FOURCC_TKHD || boxType === FOURCC_MDHD) && actualSize >= headerSize + 20) {
+      const version = bytes[offset + headerSize];
+      if (version === 0) {
+        view.setUint32(offset + headerSize + 4, 0, false);
+        view.setUint32(offset + headerSize + 8, 0, false);
+      } else if (version === 1 && actualSize >= headerSize + 28) {
+        view.setBigUint64(offset + headerSize + 4, 0n, false);
+        view.setBigUint64(offset + headerSize + 12, 0n, false);
+      }
+    }
+    offset += actualSize;
+  }
+}
+
+function checkTrakHandlerAllowed(view: DataView, start: number, end: number): boolean {
+  let mdiaStart = -1;
+  let mdiaEnd = -1;
+
+  let offset = start;
+  while (offset + 8 <= end) {
+    const bSize = view.getUint32(offset, false);
+    const bType = view.getUint32(offset + 4, false);
+    let actSize = bSize === 1 ? Number(view.getBigUint64(offset + 8, false)) : bSize;
+    if (actSize === 0) actSize = end - offset;
+    
+    if (bType === FOURCC_MDIA) {
+      mdiaStart = offset + (bSize === 1 ? 16 : 8);
+      mdiaEnd = offset + actSize;
+      break;
+    }
+    offset += actSize;
+  }
+
+  if (mdiaStart !== -1) {
+    let o = mdiaStart;
+    while (o + 8 <= mdiaEnd) {
+      const bSize = view.getUint32(o, false);
+      const bType = view.getUint32(o + 4, false);
+      let actSize = bSize === 1 ? Number(view.getBigUint64(o + 8, false)) : bSize;
+      if (actSize === 0) actSize = mdiaEnd - o;
+
+      if (bType === FOURCC_HDLR && actSize >= 24) {
+        const handlerSize = bSize === 1 ? 16 : 8;
+        const hdlrType = view.getUint32(o + handlerSize + 8, false);
+        if (hdlrType === 0x76696465 || hdlrType === 0x736f756e) {
+          return true; // vide or soun
+        }
+        return false;
+      }
+      o += actSize;
+    }
+  }
+  return false;
+}
+
 export async function sanitizeMedia(
   file: File | Blob,
   options: MediaSanitizerOptions,
   onProgress?: (percent: number) => void
 ): Promise<SanitizedResult> {
-  // Hard boundary: reject all image payloads from in-place manipulation
   const fileName = file instanceof File ? file.name : '';
   const fileMime = file.type || '';
   if (isImageMimeType(fileMime, fileName)) {
-    throw new Error(
-      `Image payload rejected from media pipeline: MIME="${fileMime}" name="${fileName}". ` +
-      'Image assets must route exclusively through canvas re-synthesis.'
-    );
+    throw new Error('Image payload rejected from media pipeline: MIME="' + fileMime + '" name="' + fileName + '". Image assets must route exclusively through canvas re-synthesis.');
   }
 
   onProgress?.(15);
@@ -252,43 +240,119 @@ export async function sanitizeMedia(
   const auditBefore = await analyzeForensics(file, originalName);
   onProgress?.(35);
 
-  let arrayBuffer: ArrayBuffer | null = await file.arrayBuffer();
-  const mimeType = file.type || '';
+  const ext = originalName.split('.').pop() || 'mp4';
+  let cleanBlob: Blob;
 
-  // Process via Web Worker with Transferable Objects
-  let cleanBytes: Uint8Array | null = await sanitizeMediaWithWorker(
-    arrayBuffer,
-    mimeType,
-    originalName
-  );
+  const headerBytes = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+  const isMp4 = isMp4OrMov(headerBytes);
+
+
+  let isOpfsEncrypted = false;
+  let isWebcodecsUsed = false;
+
+  if (isWebCodecsSupported()) {
+    try {
+      const res = await resynthesizeMediaWebCodecs(file, onProgress);
+      cleanBlob = res.blob;
+      isWebcodecsUsed = true;
+    } catch {
+      // Fallback to streaming/sanitizing
+    }
+  }
+
+  // Try OPFS Streaming for MP4/MOV with Ephemeral AES-GCM encryption
+  if (!isWebcodecsUsed && isMp4 && 'storage' in navigator && 'getDirectory' in navigator.storage) {
+    const session = await createEphemeralOpfsSession();
+    try {
+      const root = await navigator.storage.getDirectory();
+      const draftHandle = await root.getFileHandle(`temp_${Date.now()}.${ext}`, { create: true });
+      const writable = await draftHandle.createWritable();
+
+      const reader = file.stream().getReader();
+      let pos = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        sanitizeMdatInPlace(value);
+        const encryptedPacket = await session.encryptChunk(value);
+        await writable.write({ type: 'write', position: pos, data: encryptedPacket as any });
+        pos += encryptedPacket.length;
+      }
+      await writable.close();
+      isOpfsEncrypted = true;
+
+      const opfsFile = await draftHandle.getFile();
+      const finalWritable = await draftHandle.createWritable({ keepExistingData: true });
+
+      let offset = 0;
+      const totalSize = opfsFile.size;
+
+      while (offset + 8 <= totalSize) {
+        const headerBuf = await opfsFile.slice(offset, offset + 16).arrayBuffer();
+        const headerView = new DataView(headerBuf);
+        const boxSize = headerView.getUint32(0, false);
+        const boxType = headerView.getUint32(4, false);
+        let actSize = boxSize;
+        let headerSize = 8;
+
+        if (boxSize === 0) actSize = totalSize - offset;
+        else if (boxSize === 1) {
+          actSize = Number(headerView.getBigUint64(8, false));
+          headerSize = 16;
+        }
+
+        if (actSize < headerSize || offset + actSize > totalSize) break;
+
+        if (boxType === FOURCC_MOOV) {
+          const moovBuf = await opfsFile.slice(offset, offset + actSize).arrayBuffer();
+          const moovBytes = new Uint8Array(moovBuf);
+          const moovView = new DataView(moovBytes.buffer);
+          sanitizeBoxListInPlace(moovBytes, moovView, headerSize, actSize);
+          await finalWritable.write({ type: 'write', position: offset, data: moovBytes });
+        }
+        offset += actSize;
+      }
+
+      await finalWritable.close();
+      const finalOpfsFile = await draftHandle.getFile();
+      cleanBlob = finalOpfsFile;
+    } catch (err) {
+      console.warn('OPFS failed, falling back to memory', err);
+      const arrayBuffer = await file.arrayBuffer();
+      const cleanBytes = await sanitizeMediaWithWorker(arrayBuffer, fileMime, originalName);
+      cleanBlob = new Blob([cleanBytes as any], { type: fileMime || 'video/mp4' });
+    } finally {
+      session.zeroize();
+    }
+  } else if (!isWebcodecsUsed) {
+    const arrayBuffer = await file.arrayBuffer();
+    const cleanBytes = await sanitizeMediaWithWorker(arrayBuffer, fileMime, originalName);
+    cleanBlob = new Blob([cleanBytes as any], { type: fileMime || 'video/mp4' });
+  }
+
   onProgress?.(75);
 
-  const cleanBlob = new Blob([cleanBytes as any], { type: mimeType || 'video/mp4' });
-  const ext = originalName.split('.').pop() || 'mp4';
-  const sanitizedName = await generateSanitizedName(cleanBytes, ext);
+  const sanitizedName = await generateSanitizedName(new Uint8Array(await cleanBlob!.slice(0, 1024).arrayBuffer()), ext);
   onProgress?.(90);
 
-  const auditAfter = await analyzeForensics(cleanBlob, sanitizedName);
+  const auditAfter = await analyzeForensics(cleanBlob!, sanitizedName);
   onProgress?.(100);
 
-  const result: SanitizedResult = {
-    blob: cleanBlob,
+  return {
+    blob: cleanBlob!,
     originalBlob: file,
     originalName,
     sanitizedName,
     originalSize: file.size,
-    sanitizedSize: cleanBlob.size,
-    format: mimeType,
+    sanitizedSize: cleanBlob!.size,
+    format: fileMime,
     sha256: auditAfter.sha256,
     defenseLevel: options.defenseLevel,
     auditBefore,
     auditAfter,
     processedAt: Date.now(),
+    enfFiltered: true,
+    webcodecsResynthesized: isWebcodecsUsed,
+    opfsEncrypted: isOpfsEncrypted
   };
-
-  // Aggressive memory hygiene: decouple buffers for GC
-  cleanBytes = null;
-  arrayBuffer = null;
-
-  return result;
 }
