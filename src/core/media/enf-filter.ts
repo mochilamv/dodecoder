@@ -46,22 +46,38 @@ export function getEnfTargetFrequencies(sampleRate: number, maxFreq: number = 12
 export function filterChannelInPlace(channel: Float32Array, sampleRate: number, maxFreq: number = 1200): void {
   const freqs = getEnfTargetFrequencies(sampleRate, maxFreq);
   const len = channel.length;
+  
+  const numStages = freqs.length;
+  const b0 = new Float64Array(numStages);
+  const b1 = new Float64Array(numStages);
+  const b2 = new Float64Array(numStages);
+  const a1 = new Float64Array(numStages);
+  const a2 = new Float64Array(numStages);
+  const x1 = new Float64Array(numStages);
+  const x2 = new Float64Array(numStages);
+  const y1 = new Float64Array(numStages);
+  const y2 = new Float64Array(numStages);
 
-  for (const f0 of freqs) {
-    const { b0, b1, b2, a1, a2 } = createNotchCoeffs(f0, sampleRate, 10);
-    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let s = 0; s < numStages; s++) {
+    const coeffs = createNotchCoeffs(freqs[s], sampleRate, 10);
+    b0[s] = coeffs.b0;
+    b1[s] = coeffs.b1;
+    b2[s] = coeffs.b2;
+    a1[s] = coeffs.a1;
+    a2[s] = coeffs.a2;
+  }
 
-    for (let i = 0; i < len; i++) {
-      const x0 = channel[i];
-      const y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
-
-      x2 = x1;
-      x1 = x0;
-      y2 = y1;
-      y1 = y0;
-
-      channel[i] = y0;
+  for (let i = 0; i < len; i++) {
+    let val = channel[i];
+    for (let s = 0; s < numStages; s++) {
+      const y0 = b0[s] * val + b1[s] * x1[s] + b2[s] * x2[s] - a1[s] * y1[s] - a2[s] * y2[s];
+      x2[s] = x1[s];
+      x1[s] = val;
+      y2[s] = y1[s];
+      y1[s] = y0;
+      val = y0;
     }
+    channel[i] = val;
   }
 }
 

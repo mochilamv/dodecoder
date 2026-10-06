@@ -754,3 +754,62 @@ test('25. WebCodecs Resynthesis & Media Sanitizer Sprint 4 Metadata', async () =
   assert.equal(typeof result.sha256, 'string');
 });
 
+test('26. Cryptographic Padding Directive: WebP / RIFF', async () => {
+  const { applyCryptographicPadding } = await import('../src/core/forensic/crypto-padding');
+  
+  // Construct a minimal dummy RIFF file (WebP)
+  const size = 1500;
+  const header = new Uint8Array(12);
+  const dv = new DataView(header.buffer);
+  
+  dv.setUint8(0, 0x52); // R
+  dv.setUint8(1, 0x49); // I
+  dv.setUint8(2, 0x46); // F
+  dv.setUint8(3, 0x46); // F
+  
+  dv.setUint32(4, size - 8, true); // size
+  
+  dv.setUint8(8, 0x57); // W
+  dv.setUint8(9, 0x45); // E
+  dv.setUint8(10, 0x42); // B
+  dv.setUint8(11, 0x50); // P
+  
+  const body = new Uint8Array(size - 12);
+  const blob = new Blob([header, body], { type: 'image/webp' });
+  
+  const paddedBlob = await applyCryptographicPadding(blob, 'image/webp', true);
+  
+  // 524288 bucket
+  assert.equal(paddedBlob.size, 524288, 'Final padded size must strictly be a multiple of 524288');
+  assert.equal(paddedBlob.type, 'image/webp', 'MIME type must be preserved');
+  
+  // Check new RIFF header size
+  const newHeader = new Uint8Array(await paddedBlob.slice(0, 12).arrayBuffer());
+  const newDv = new DataView(newHeader.buffer);
+  const newRiffSize = newDv.getUint32(4, true);
+  assert.equal(newRiffSize + 8, 524288, 'Main RIFF header size must reflect the padded size');
+});
+
+test('27. Cryptographic Padding Directive: MP4 / ISOBMFF', async () => {
+  const { applyCryptographicPadding } = await import('../src/core/forensic/crypto-padding');
+  
+  const size = 20000;
+  const header = new Uint8Array(12);
+  const dv = new DataView(header.buffer);
+  
+  dv.setUint32(0, 20, false); // ftyp size
+  dv.setUint8(4, 0x66); // f
+  dv.setUint8(5, 0x74); // t
+  dv.setUint8(6, 0x79); // y
+  dv.setUint8(7, 0x70); // p
+  
+  const body = new Uint8Array(size - 12);
+  const blob = new Blob([header, body], { type: 'video/mp4' });
+  
+  const paddedBlob = await applyCryptographicPadding(blob, 'video/mp4');
+  
+  assert.equal(paddedBlob.size, 524288, 'Final padded size must strictly be a multiple of 524288');
+  assert.equal(paddedBlob.type, 'video/mp4', 'MIME type must be preserved');
+});
+
+

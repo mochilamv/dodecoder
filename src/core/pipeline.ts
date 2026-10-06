@@ -1,6 +1,7 @@
 import { DefenseLevel, OutputFormat, SanitizedResult } from './types';
 import { sanitizeImage } from './image/image-sanitizer';
 import { sanitizeMedia } from './media/media-sanitizer';
+import { applyCryptographicPadding } from './forensic/crypto-padding';
 
 export interface PipelineOptions {
   defenseLevel?: DefenseLevel;
@@ -32,18 +33,22 @@ export async function processMediaFile(
   if (isImage) {
     const isLossless = mime === 'image/png' || name.toLowerCase().endsWith('.png');
     const outputFormat = isLossless ? 'image/png' : 'image/webp';
-    return await sanitizeImage(file, {
+    const sanitized = await sanitizeImage(file, {
       defenseLevel,
       outputFormat,
       quality: isLossless ? undefined : quality,
       extremeSanitization,
     }, onProgress);
+    const paddedBlob = await applyCryptographicPadding(sanitized.blob, sanitized.blob.type, true);
+    return { ...sanitized, blob: paddedBlob };
   }
 
   if (isVideoOrAudio) {
-    return await sanitizeMedia(file, {
+    const sanitized = await sanitizeMedia(file, {
       defenseLevel,
     }, onProgress);
+    const paddedBlob = await applyCryptographicPadding(sanitized.blob, sanitized.blob.type);
+    return { ...sanitized, blob: paddedBlob };
   }
 
   // No fallback: unrecognized file types are strictly rejected
