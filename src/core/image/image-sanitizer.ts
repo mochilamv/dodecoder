@@ -11,7 +11,6 @@ export interface ImageSanitizerOptions {
   defenseLevel: DefenseLevel;
   outputFormat: OutputFormat;
   quality?: number;
-  extremeSanitization?: boolean;
 }
 
 const TILE_SIZE = 2048;
@@ -142,7 +141,6 @@ export async function sanitizeImage(
     auditAfter,
     processedAt: Date.now(),
     isDeepDecontaminated,
-    extremeSanitization: options.extremeSanitization,
     tilesProcessed,
     wasmEncoded: true
   };

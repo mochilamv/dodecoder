@@ -50,16 +50,6 @@ export function renderLegalModal(onClose: () => void): HTMLElement {
         <h3 class="text-sm font-bold text-[#FFFFFF] uppercase tracking-widest">Third-Party Dependencies</h3>
         <ul class="space-y-4">
           <li>
-            <div class="font-bold text-[#FFFFFF]">FFmpeg.wasm (ffmpeg/ffmpeg)</div>
-            <div class="text-[#FFFFFF]/70">Licensed under LGPL v2.1+ / GPL v2.0+</div>
-            <div class="text-[#FFFFFF]/70">Used for local in-browser video/audio sanitization via WebAssembly.</div>
-          </li>
-          <li>
-            <div class="font-bold text-[#FFFFFF]">JSZip</div>
-            <div class="text-[#FFFFFF]/70">Licensed under MIT or GPLv3</div>
-            <div class="text-[#FFFFFF]/70">Used for creating sanitized payload archives.</div>
-          </li>
-          <li>
             <div class="font-bold text-[#FFFFFF]">Lucide Icons</div>
             <div class="text-[#FFFFFF]/70">Licensed under ISC</div>
             <div class="text-[#FFFFFF]/70">SVG iconography used in the interface.</div>

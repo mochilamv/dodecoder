@@ -55,7 +55,7 @@ export class DoDecoderApp {
       </div>
       <div class="flex flex-wrap items-center justify-center gap-4">
         <span>MIT License</span>
-        <span>•</span>
+        <span>-</span>
         <button id="footer-legal-btn" class="hover:text-[#FFFFFF] underline cursor-pointer focus-visible:outline-2 focus-visible:outline-[#00FF00]">
           Licenses & Legal
         </button>
@@ -100,7 +100,6 @@ export class DoDecoderApp {
           item.file,
           {
             quality: 0.60,
-            extremeSanitization: true,
           },
           pct => {
             item.progress = pct;

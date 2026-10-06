@@ -51,7 +51,6 @@ export interface SanitizedResult {
   auditAfter: ForensicReport;
   processedAt: number;
   isDeepDecontaminated?: boolean;
-  extremeSanitization?: boolean;
   tilesProcessed?: number;
   enfFiltered?: boolean;
   wasmEncoded?: boolean;

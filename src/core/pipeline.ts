@@ -7,7 +7,6 @@ export interface PipelineOptions {
   defenseLevel?: DefenseLevel;
   outputFormat?: OutputFormat;
   quality?: number;
-  extremeSanitization?: boolean;
 }
 
 /**
@@ -25,7 +24,6 @@ export async function processMediaFile(
   // Always enforce maximum protection
   const defenseLevel: DefenseLevel = options.defenseLevel || 'paranoid';
   const quality = options.quality ?? 0.85;
-  const extremeSanitization = true;
 
   const isImage = mime.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp|gif|tiff)$/i.test(name);
   const isVideoOrAudio = mime.startsWith('video/') || mime.startsWith('audio/') || /\.(mp4|mov|mkv|webm|mp3|wav|ogg|aac|m4a)$/i.test(name);
@@ -37,7 +35,6 @@ export async function processMediaFile(
       defenseLevel,
       outputFormat,
       quality: isLossless ? undefined : quality,
-      extremeSanitization,
     }, onProgress);
     const paddedBlob = await applyCryptographicPadding(sanitized.blob, sanitized.blob.type, true);
     return { ...sanitized, blob: paddedBlob };
