@@ -25,6 +25,7 @@ self.onmessage = async (event: MessageEvent) => {
     const outCtx = outCanvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
     if (!outCtx) throw new Error('WORKER_CONTEXT_FAILED');
 
+    let currentTile = 0;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const sx = c * TILE_SIZE;
@@ -48,11 +49,19 @@ self.onmessage = async (event: MessageEvent) => {
         tileCtx.putImageData(imgData, 0, 0);
 
         outCtx.drawImage(tileCanvas, sx, sy);
+
+        currentTile++;
+        (self as any).postMessage({
+          type: 'progress',
+          percent: Math.round(25 + (currentTile / totalTiles) * 50)
+        });
       }
     }
 
+    (self as any).postMessage({ type: 'progress', percent: 78 });
     const finalImgData = outCtx.getImageData(0, 0, width, height);
     const rawEncoded = await encodeDeterministicWebp(finalImgData.data, width, height);
+    (self as any).postMessage({ type: 'progress', percent: 90 });
     const cleanBytes = stripDisplayColorProfiles(rawEncoded, 'image/webp');
 
     const resultBuffer = cleanBytes.buffer.slice(

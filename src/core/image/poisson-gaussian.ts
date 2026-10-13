@@ -22,41 +22,41 @@ export function applyPoissonGaussianNoise(
   const TWO_PI = 2 * Math.PI;
   const INV_U32 = 1 / 4294967296;
   const randWords = new Uint32Array(16384);
-  let randIdx = 16384; 
-
-  function nextU32(): number {
-    if (randIdx >= 16384) {
-      crypto.getRandomValues(randWords);
-      randIdx = 0;
-    }
-    return randWords[randIdx++];
-  }
+  let randIdx = 16384;
 
   const limit = data.length - 7;
   let i = 0;
   for (; i < limit; i += 8) {
+    if (randIdx > 16384 - 6) {
+      crypto.getRandomValues(randWords);
+      randIdx = 0;
+    }
     const r1 = data[i], g1 = data[i + 1], b1 = data[i + 2];
     const r2 = data[i + 4], g2 = data[i + 5], b2 = data[i + 6];
 
-    const u1 = (nextU32() + 1) * INV_U32;
-    const u2 = (nextU32() + 1) * INV_U32;
-    const u3 = (nextU32() + 1) * INV_U32;
-    const u4 = (nextU32() + 1) * INV_U32;
-    const u5 = (nextU32() + 1) * INV_U32;
-    const u6 = (nextU32() + 1) * INV_U32;
+    const u1 = (randWords[randIdx++] + 1) * INV_U32;
+    const u2 = (randWords[randIdx++] + 1) * INV_U32;
+    const u3 = (randWords[randIdx++] + 1) * INV_U32;
+    const u4 = (randWords[randIdx++] + 1) * INV_U32;
+    const u5 = (randWords[randIdx++] + 1) * INV_U32;
+    const u6 = (randWords[randIdx++] + 1) * INV_U32;
 
     const mag1 = Math.sqrt(-2 * Math.log(u1));
     const mag2 = Math.sqrt(-2 * Math.log(u3));
     const mag3 = Math.sqrt(-2 * Math.log(u5));
 
-    const zR1 = mag1 * Math.cos(TWO_PI * u2);
-    const zG1 = mag1 * Math.sin(TWO_PI * u2);
+    const ang1 = TWO_PI * u2;
+    const ang2 = TWO_PI * u4;
+    const ang3 = TWO_PI * u6;
 
-    const zB1 = mag2 * Math.cos(TWO_PI * u4);
-    const zR2 = mag2 * Math.sin(TWO_PI * u4);
+    const zR1 = mag1 * Math.cos(ang1);
+    const zG1 = mag1 * Math.sin(ang1);
 
-    const zG2 = mag3 * Math.cos(TWO_PI * u6);
-    const zB2 = mag3 * Math.sin(TWO_PI * u6);
+    const zB1 = mag2 * Math.cos(ang2);
+    const zR2 = mag2 * Math.sin(ang2);
+
+    const zG2 = mag3 * Math.cos(ang3);
+    const zB2 = mag3 * Math.sin(ang3);
 
     const s1 = Math.sqrt(a * (0.2126 * r1 + 0.7152 * g1 + 0.0722 * b1) + b);
     const s2 = Math.sqrt(a * (0.2126 * r2 + 0.7152 * g2 + 0.0722 * b2) + b);
@@ -77,11 +77,15 @@ export function applyPoissonGaussianNoise(
   }
 
   if (i < data.length) {
+    if (randIdx > 16384 - 4) {
+      crypto.getRandomValues(randWords);
+      randIdx = 0;
+    }
     const r = data[i], g = data[i + 1], bChannel = data[i + 2];
-    const u1 = (nextU32() + 1) * INV_U32;
-    const u2 = (nextU32() + 1) * INV_U32;
-    const u3 = (nextU32() + 1) * INV_U32;
-    const u4 = (nextU32() + 1) * INV_U32;
+    const u1 = (randWords[randIdx++] + 1) * INV_U32;
+    const u2 = (randWords[randIdx++] + 1) * INV_U32;
+    const u3 = (randWords[randIdx++] + 1) * INV_U32;
+    const u4 = (randWords[randIdx++] + 1) * INV_U32;
     const mag1 = Math.sqrt(-2 * Math.log(u1));
     const mag2 = Math.sqrt(-2 * Math.log(u3));
     const zR = mag1 * Math.cos(TWO_PI * u2);

@@ -44,6 +44,10 @@ export async function sanitizeImage(
         { type: 'module' }
       );
       worker.onmessage = (e) => {
+        if (e.data.type === 'progress') {
+          onProgress?.(e.data.percent);
+          return;
+        }
         if (e.data.error) reject(new Error(e.data.error));
         else resolve({ buffer: e.data.buffer, tilesProcessed: e.data.tilesProcessed });
         worker.terminate();
@@ -63,7 +67,7 @@ export async function sanitizeImage(
     tilesProcessed = workerRes.tilesProcessed;
   } catch (err) {
     console.warn('Worker pipeline failed, falling back to Main Thread row-batched chunks:', err);
-    const blob = new Blob([rawBuffer], { type: file.type });
+    const blob = file;
     const metaBitmap = await createImageBitmap(blob);
     const width = metaBitmap.width;
     const height = metaBitmap.height;

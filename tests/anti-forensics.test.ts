@@ -812,4 +812,23 @@ test('27. Cryptographic Padding Directive: MP4 / ISOBMFF', async () => {
   assert.equal(paddedBlob.type, 'video/mp4', 'MIME type must be preserved');
 });
 
+test('28. Cryptographic Padding Sub-Header Boundary Expansion', async () => {
+  const { applyCryptographicPadding } = await import('../src/core/forensic/crypto-padding');
+
+  const size = 524288 - 4;
+  const header = new Uint8Array(12);
+  const dv = new DataView(header.buffer);
+  dv.setUint32(0, 20, false);
+  dv.setUint8(4, 0x66);
+  dv.setUint8(5, 0x74);
+  dv.setUint8(6, 0x79);
+  dv.setUint8(7, 0x70);
+
+  const body = new Uint8Array(size - 12);
+  const blob = new Blob([header, body], { type: 'video/mp4' });
+
+  const paddedBlob = await applyCryptographicPadding(blob, 'video/mp4');
+  assert.equal(paddedBlob.size, 524288 * 2, 'Must expand to next bucket when pad < HEADER_SIZE without recursion');
+});
+
 

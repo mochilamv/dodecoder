@@ -37,12 +37,7 @@ export async function applyCryptographicPadding(blob: Blob, type: string, allowS
   }
   
   if (pad === 0) return blob;
-  
-  const payloadSize = pad - HEADER_SIZE;
-  if (payloadSize < 0) {
-     return applyCryptographicPadding(blob, type, allowSimpleWebp);
-  }
-  
+
   const newTarget = pad < HEADER_SIZE ? target + BLOCK_SIZE : target;
   const finalPad = newTarget - blob.size;
   const finalPayloadSize = finalPad - HEADER_SIZE;
