@@ -13,9 +13,25 @@ self.onmessage = async (event: MessageEvent) => {
     const blob = new Blob([buffer], { type: mimeType });
 
     const metaBitmap = await createImageBitmap(blob);
-    const width = metaBitmap.width;
-    const height = metaBitmap.height;
+    let width = metaBitmap.width;
+    let height = metaBitmap.height;
     metaBitmap.close();
+
+    const maxEdge = Math.max(width, height);
+    let workingBlob: Blob = blob;
+
+    if (maxEdge > 1920) {
+      const scale = 1920 / maxEdge;
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+
+      const dsCanvas = new OffscreenCanvas(width, height);
+      const dsCtx = dsCanvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;
+      const rawBitmap = await createImageBitmap(blob);
+      dsCtx.drawImage(rawBitmap, 0, 0, width, height);
+      rawBitmap.close();
+      workingBlob = await dsCanvas.convertToBlob({ type: 'image/png' });
+    }
 
     const cols = Math.ceil(width / TILE_SIZE);
     const rows = Math.ceil(height / TILE_SIZE);
@@ -33,7 +49,7 @@ self.onmessage = async (event: MessageEvent) => {
         const sw = Math.min(TILE_SIZE, width - sx);
         const sh = Math.min(TILE_SIZE, height - sy);
 
-        const tileBitmap = await createImageBitmap(blob, sx, sy, sw, sh);
+        const tileBitmap = await createImageBitmap(workingBlob, sx, sy, sw, sh);
 
         const tileCanvas = new OffscreenCanvas(sw, sh);
         const tileCtx = tileCanvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true }) as OffscreenCanvasRenderingContext2D;

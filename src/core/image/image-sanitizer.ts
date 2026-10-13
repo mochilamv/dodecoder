@@ -38,6 +38,7 @@ export async function sanitizeImage(
   let tilesProcessed = 0;
 
   try {
+    let wasmTicker: ReturnType<typeof setInterval> | null = null;
     const workerRes = await new Promise<{ buffer: ArrayBuffer; tilesProcessed: number }>((resolve, reject) => {
       const worker = new Worker(
         new URL('../workers/image.worker.ts', import.meta.url),
@@ -45,14 +46,39 @@ export async function sanitizeImage(
       );
       worker.onmessage = (e) => {
         if (e.data.type === 'progress') {
+          if (e.data.percent === 78) {
+            onProgress?.(78);
+            if (!wasmTicker) {
+              let p = 78;
+              wasmTicker = setInterval(() => {
+                if (p < 89) {
+                  p++;
+                  onProgress?.(p);
+                }
+              }, 1200);
+            }
+            return;
+          }
+          if (wasmTicker) {
+            clearInterval(wasmTicker);
+            wasmTicker = null;
+          }
           onProgress?.(e.data.percent);
           return;
+        }
+        if (wasmTicker) {
+          clearInterval(wasmTicker);
+          wasmTicker = null;
         }
         if (e.data.error) reject(new Error(e.data.error));
         else resolve({ buffer: e.data.buffer, tilesProcessed: e.data.tilesProcessed });
         worker.terminate();
       };
       worker.onerror = (e) => {
+        if (wasmTicker) {
+          clearInterval(wasmTicker);
+          wasmTicker = null;
+        }
         reject(e);
         worker.terminate();
       };
@@ -69,9 +95,29 @@ export async function sanitizeImage(
     console.warn('Worker pipeline failed, falling back to Main Thread row-batched chunks:', err);
     const blob = file;
     const metaBitmap = await createImageBitmap(blob);
-    const width = metaBitmap.width;
-    const height = metaBitmap.height;
+    let width = metaBitmap.width;
+    let height = metaBitmap.height;
     metaBitmap.close();
+
+    const maxEdge = Math.max(width, height);
+    let workingBlob: File | Blob = blob;
+
+    if (maxEdge > 1920) {
+      const scale = 1920 / maxEdge;
+      width = Math.round(width * scale);
+      height = Math.round(height * scale);
+
+      const dsCanvas = document.createElement('canvas');
+      dsCanvas.width = width;
+      dsCanvas.height = height;
+      const dsCtx = dsCanvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true })!;
+      const rawBitmap = await createImageBitmap(blob);
+      dsCtx.drawImage(rawBitmap, 0, 0, width, height);
+      rawBitmap.close();
+      workingBlob = await new Promise<Blob>((res, rej) =>
+        dsCanvas.toBlob(b => b ? res(b) : rej(new Error('Downscale failed')), 'image/png')
+      );
+    }
 
     const cols = Math.ceil(width / TILE_SIZE);
     const rows = Math.ceil(height / TILE_SIZE);
@@ -91,7 +137,7 @@ export async function sanitizeImage(
         const sw = Math.min(TILE_SIZE, width - sx);
         const sh = Math.min(TILE_SIZE, height - sy);
 
-        const tileBitmap = await createImageBitmap(blob, sx, sy, sw, sh);
+        const tileBitmap = await createImageBitmap(workingBlob, sx, sy, sw, sh);
         const tileCanvas = document.createElement('canvas');
         tileCanvas.width = sw;
         tileCanvas.height = sh;
@@ -110,13 +156,15 @@ export async function sanitizeImage(
         outCtx.drawImage(tileCanvas, sx, sy);
 
         currentTile++;
-        onProgress?.(25 + (currentTile / tilesProcessed) * 60);
+        onProgress?.(25 + (currentTile / tilesProcessed) * 50);
         await new Promise(r => setTimeout(r, 0));
       }
     }
 
+    onProgress?.(78);
     const finalImageData = outCtx.getImageData(0, 0, width, height);
     const wasmEncoded = await encodeDeterministicWebp(finalImageData.data, width, height);
+    onProgress?.(90);
     cleanBytes = stripDisplayColorProfiles(wasmEncoded, effectiveMime);
   }
 

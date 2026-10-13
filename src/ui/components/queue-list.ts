@@ -130,7 +130,7 @@ export function renderQueueList(
             isProcessing
               ? `
             <div class="text-[10px] text-[#FFFFFF] font-mono flex justify-between">
-              <span>${item.status === 'analyzing' ? 'Scanning...' : 'Re-encoding...'}</span>
+              <span>${item.status === 'analyzing' ? 'Scanning...' : item.progress >= 78 && item.progress < 90 ? 'Synthesizing WebP...' : 'Re-encoding...'}</span>
               <span>${item.progress}%</span>
             </div>
           `
