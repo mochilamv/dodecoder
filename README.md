@@ -19,7 +19,8 @@ Standard metadata strippers remove tags while leaving tracking artifacts intact.
 ## 2. Architecture and Pipeline
 
 ### Image Sanitization Pipeline
-- Deterministic WASM Encoder: Pure Rust wasm32-unknown-unknown WebP Lossless encoder (VP8L). Eliminates OffscreenCanvas convertToBlob() discrepancies across browsers and ensures bit-identical deterministic outputs.
+- Dedicated Web Worker Pipeline: Offloads spatial tile processing to a dedicated background worker (image.worker.ts) with fine-grained progress telemetry, preventing main-thread UI starvation during image operations.
+- Native Lossy WebP Re-Synthesis: Reconstructs sanitized bitmap tiles through OffscreenCanvas convertToBlob() targeting lossy WebP at 60% quality (WEBP_QUALITY = 0.6). Replaces CPU-bound software encoding to ensure fast execution on high-resolution inputs while forcing transform quantization.
 - Proportional Resolution Downscaling: Decodes image stream and clamps maximum dimension to 1920px using bicubic interpolation before perturbation.
 - Spatial Grid Tiling: Bypasses memory limitations and canvas size restrictions by processing ultra-high-resolution images via sequential createImageBitmap spatial tiling.
 - PRNU Disruption & CMOS Noise Simulation: Heteroscedastic luminance-coupled Poisson-Gaussian noise model (variance = a*I + b). Replaces discrete LSB bitmasking to realistically simulate physical CMOS sensors via Box-Muller transformations.
