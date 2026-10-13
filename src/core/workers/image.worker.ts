@@ -2,9 +2,9 @@ import { applyPrnuDefense } from '../image/prnu-defense';
 import { applyDeepDecontamination } from '../image/decontamination';
 import { stripDisplayColorProfiles } from '../image/icc-sanitizer';
 import { applyPoissonGaussianNoise } from '../image/poisson-gaussian';
-import { encodeDeterministicWebp } from '../image/wasm-encoder';
 
 const TILE_SIZE = 2048;
+const WEBP_QUALITY = 0.6;
 
 self.onmessage = async (event: MessageEvent) => {
   const { buffer, mimeType, options, needsAlpha } = event.data;
@@ -74,9 +74,10 @@ self.onmessage = async (event: MessageEvent) => {
       }
     }
 
-    (self as any).postMessage({ type: 'progress', percent: 78 });
-    const finalImgData = outCtx.getImageData(0, 0, width, height);
-    const rawEncoded = await encodeDeterministicWebp(finalImgData.data, width, height);
+    (self as any).postMessage({ type: 'progress', percent: 80 });
+    const encodedBlob = await outCanvas.convertToBlob({ type: 'image/webp', quality: WEBP_QUALITY });
+    if (encodedBlob.type !== 'image/webp') throw new Error('WEBP_ENCODE_UNSUPPORTED');
+    const rawEncoded = new Uint8Array(await encodedBlob.arrayBuffer());
     (self as any).postMessage({ type: 'progress', percent: 90 });
     const cleanBytes = stripDisplayColorProfiles(rawEncoded, 'image/webp');
 
@@ -86,7 +87,7 @@ self.onmessage = async (event: MessageEvent) => {
     );
 
     (self as any).postMessage(
-      { buffer: resultBuffer, tilesProcessed: totalTiles, wasmEncoded: true },
+      { buffer: resultBuffer, tilesProcessed: totalTiles, wasmEncoded: false },
       [resultBuffer]
     );
   } catch (err: any) {

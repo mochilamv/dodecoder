@@ -831,4 +831,39 @@ test('28. Cryptographic Padding Sub-Header Boundary Expansion', async () => {
   assert.equal(paddedBlob.size, 524288 * 2, 'Must expand to next bucket when pad < HEADER_SIZE without recursion');
 });
 
+test('29. median9 selection network equals full-sort median', async () => {
+  const { median9 } = await import('../src/core/image/decontamination');
+  const ref = (v: Uint8Array) => Array.from(v).sort((a, b) => a - b)[4];
+  const v = new Uint8Array(9);
+
+  let s = 0x2545f491;
+  for (let n = 0; n < 300000; n++) {
+    const range = (n & 3) === 0 ? 3 : (n & 3) === 1 ? 16 : 256;
+    for (let i = 0; i < 9; i++) {
+      s ^= s << 13; s ^= s >>> 17; s ^= s << 5;
+      v[i] = (s >>> 0) % range;
+    }
+    assert.equal(median9(v), ref(v), `mismatch on ${Array.from(v).join(',')}`);
+  }
+
+  const idx = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+  const permute = (k: number) => {
+    if (k === 9) {
+      for (let i = 0; i < 9; i++) v[i] = idx[i] * 30;
+      assert.equal(median9(v), 120, `permutation ${idx.join(',')}`);
+      return;
+    }
+    for (let i = k; i < 9; i++) {
+      [idx[k], idx[i]] = [idx[i], idx[k]];
+      permute(k + 1);
+      [idx[k], idx[i]] = [idx[i], idx[k]];
+    }
+  };
+  permute(0);
+
+  v.fill(255);
+  assert.equal(median9(v), 255);
+  v.fill(0);
+  assert.equal(median9(v), 0);
+});
 

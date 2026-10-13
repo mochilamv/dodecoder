@@ -5,7 +5,6 @@ import { applyPrnuDefense } from './prnu-defense';
 import { stripDisplayColorProfiles } from './icc-sanitizer';
 import { applyDeepDecontamination } from './decontamination';
 import { applyPoissonGaussianNoise } from './poisson-gaussian';
-import { encodeDeterministicWebp } from './wasm-encoder';
 
 export interface ImageSanitizerOptions {
   defenseLevel: DefenseLevel;
@@ -14,6 +13,7 @@ export interface ImageSanitizerOptions {
 }
 
 const TILE_SIZE = 2048;
+const WEBP_QUALITY = 0.6;
 
 export async function sanitizeImage(
   file: File | Blob,
@@ -38,7 +38,6 @@ export async function sanitizeImage(
   let tilesProcessed = 0;
 
   try {
-    let wasmTicker: ReturnType<typeof setInterval> | null = null;
     const workerRes = await new Promise<{ buffer: ArrayBuffer; tilesProcessed: number }>((resolve, reject) => {
       const worker = new Worker(
         new URL('../workers/image.worker.ts', import.meta.url),
@@ -46,39 +45,14 @@ export async function sanitizeImage(
       );
       worker.onmessage = (e) => {
         if (e.data.type === 'progress') {
-          if (e.data.percent === 78) {
-            onProgress?.(78);
-            if (!wasmTicker) {
-              let p = 78;
-              wasmTicker = setInterval(() => {
-                if (p < 89) {
-                  p++;
-                  onProgress?.(p);
-                }
-              }, 1200);
-            }
-            return;
-          }
-          if (wasmTicker) {
-            clearInterval(wasmTicker);
-            wasmTicker = null;
-          }
           onProgress?.(e.data.percent);
           return;
-        }
-        if (wasmTicker) {
-          clearInterval(wasmTicker);
-          wasmTicker = null;
         }
         if (e.data.error) reject(new Error(e.data.error));
         else resolve({ buffer: e.data.buffer, tilesProcessed: e.data.tilesProcessed });
         worker.terminate();
       };
       worker.onerror = (e) => {
-        if (wasmTicker) {
-          clearInterval(wasmTicker);
-          wasmTicker = null;
-        }
         reject(e);
         worker.terminate();
       };
@@ -161,11 +135,13 @@ export async function sanitizeImage(
       }
     }
 
-    onProgress?.(78);
-    const finalImageData = outCtx.getImageData(0, 0, width, height);
-    const wasmEncoded = await encodeDeterministicWebp(finalImageData.data, width, height);
+    onProgress?.(80);
+    const encodedBlob = await new Promise<Blob>((res, rej) =>
+      outCanvas.toBlob(b => b && b.type === 'image/webp' ? res(b) : rej(new Error('WEBP_ENCODE_UNSUPPORTED')), 'image/webp', WEBP_QUALITY)
+    );
+    const rawEncoded = new Uint8Array(await encodedBlob.arrayBuffer());
     onProgress?.(90);
-    cleanBytes = stripDisplayColorProfiles(wasmEncoded, effectiveMime);
+    cleanBytes = stripDisplayColorProfiles(rawEncoded, effectiveMime);
   }
 
   onProgress?.(92);
@@ -194,6 +170,6 @@ export async function sanitizeImage(
     processedAt: Date.now(),
     isDeepDecontaminated,
     tilesProcessed,
-    wasmEncoded: true
+    wasmEncoded: false
   };
 }

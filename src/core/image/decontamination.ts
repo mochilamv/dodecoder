@@ -142,16 +142,29 @@ export function applySpatialMicroResampling(
   destCtx.putImageData(destImgData, 0, 0);
 }
 
-function sort9(arr: Uint8Array): void {
-  for (let i = 1; i < 9; i++) {
-    const val = arr[i];
-    let j = i - 1;
-    while (j >= 0 && arr[j] > val) {
-      arr[j + 1] = arr[j];
-      j--;
-    }
-    arr[j + 1] = val;
-  }
+export function median9(v: Uint8Array): number {
+  let p0 = v[0], p1 = v[1], p2 = v[2], p3 = v[3], p4 = v[4], p5 = v[5], p6 = v[6], p7 = v[7], p8 = v[8];
+  let t = 0;
+  if (p1 > p2) { t = p1; p1 = p2; p2 = t; }
+  if (p4 > p5) { t = p4; p4 = p5; p5 = t; }
+  if (p7 > p8) { t = p7; p7 = p8; p8 = t; }
+  if (p0 > p1) { t = p0; p0 = p1; p1 = t; }
+  if (p3 > p4) { t = p3; p3 = p4; p4 = t; }
+  if (p6 > p7) { t = p6; p6 = p7; p7 = t; }
+  if (p1 > p2) { t = p1; p1 = p2; p2 = t; }
+  if (p4 > p5) { t = p4; p4 = p5; p5 = t; }
+  if (p7 > p8) { t = p7; p7 = p8; p8 = t; }
+  if (p0 > p3) { t = p0; p0 = p3; p3 = t; }
+  if (p5 > p8) { t = p5; p5 = p8; p8 = t; }
+  if (p4 > p7) { t = p4; p4 = p7; p7 = t; }
+  if (p3 > p6) { t = p3; p3 = p6; p6 = t; }
+  if (p1 > p4) { t = p1; p1 = p4; p4 = t; }
+  if (p2 > p5) { t = p2; p2 = p5; p5 = t; }
+  if (p4 > p7) { t = p4; p4 = p7; p7 = t; }
+  if (p4 > p2) { t = p4; p4 = p2; p2 = t; }
+  if (p6 > p4) { t = p6; p6 = p4; p4 = t; }
+  if (p4 > p2) { p4 = p2; }
+  return p4;
 }
 
 export function applyMedianFilterCpu(
@@ -187,14 +200,10 @@ export function applyMedianFilterCpu(
         }
       }
 
-      sort9(r);
-      sort9(g);
-      sort9(b);
-
       const outPos = (rowBase + x) << 2;
-      output[outPos] = r[4];
-      output[outPos + 1] = g[4];
-      output[outPos + 2] = b[4];
+      output[outPos] = median9(r);
+      output[outPos + 1] = median9(g);
+      output[outPos + 2] = median9(b);
     }
   }
   data.set(output);
