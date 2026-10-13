@@ -755,7 +755,7 @@ test('25. WebCodecs Resynthesis & Media Sanitizer Sprint 4 Metadata', async () =
 });
 
 test('26. Cryptographic Padding Directive: WebP / RIFF', async () => {
-  const { applyCryptographicPadding } = await import('../src/core/forensic/crypto-padding');
+  const { applyCryptographicPadding, computeDynamicPaddedSize } = await import('../src/core/forensic/crypto-padding');
   
   // Construct a minimal dummy RIFF file (WebP)
   const size = 1500;
@@ -778,20 +778,21 @@ test('26. Cryptographic Padding Directive: WebP / RIFF', async () => {
   const blob = new Blob([header, body], { type: 'image/webp' });
   
   const paddedBlob = await applyCryptographicPadding(blob, 'image/webp', true);
+  const expectedSize = computeDynamicPaddedSize(size);
   
-  // 524288 bucket
-  assert.equal(paddedBlob.size, 524288, 'Final padded size must strictly be a multiple of 524288');
+  assert.equal(paddedBlob.size, expectedSize, `Final padded size must match Padme-H target (${expectedSize})`);
   assert.equal(paddedBlob.type, 'image/webp', 'MIME type must be preserved');
+  assert.ok(paddedBlob.size - size >= 8, 'Padding headroom must strictly accommodate chunk header');
   
   // Check new RIFF header size
   const newHeader = new Uint8Array(await paddedBlob.slice(0, 12).arrayBuffer());
   const newDv = new DataView(newHeader.buffer);
   const newRiffSize = newDv.getUint32(4, true);
-  assert.equal(newRiffSize + 8, 524288, 'Main RIFF header size must reflect the padded size');
+  assert.equal(newRiffSize + 8, expectedSize, 'Main RIFF header size must reflect the padded size');
 });
 
 test('27. Cryptographic Padding Directive: MP4 / ISOBMFF', async () => {
-  const { applyCryptographicPadding } = await import('../src/core/forensic/crypto-padding');
+  const { applyCryptographicPadding, computeDynamicPaddedSize } = await import('../src/core/forensic/crypto-padding');
   
   const size = 20000;
   const header = new Uint8Array(12);
@@ -807,15 +808,24 @@ test('27. Cryptographic Padding Directive: MP4 / ISOBMFF', async () => {
   const blob = new Blob([header, body], { type: 'video/mp4' });
   
   const paddedBlob = await applyCryptographicPadding(blob, 'video/mp4');
+  const expectedSize = computeDynamicPaddedSize(size);
   
-  assert.equal(paddedBlob.size, 524288, 'Final padded size must strictly be a multiple of 524288');
+  assert.equal(paddedBlob.size, expectedSize, `Final padded size must match Padme-H target (${expectedSize})`);
   assert.equal(paddedBlob.type, 'video/mp4', 'MIME type must be preserved');
+  assert.ok(paddedBlob.size - size >= 8, 'Padding headroom must strictly accommodate box header');
 });
 
 test('28. Cryptographic Padding Sub-Header Boundary Expansion', async () => {
-  const { applyCryptographicPadding } = await import('../src/core/forensic/crypto-padding');
+  const { applyCryptographicPadding, computeDynamicPaddedSize } = await import('../src/core/forensic/crypto-padding');
 
-  const size = 524288 - 4;
+  const testVectors = [4, 32768, 524288, 10485760];
+  for (const v of testVectors) {
+    const padded = computeDynamicPaddedSize(v);
+    assert.ok(padded >= v + 8, `Padded size (${padded}) must accommodate payload (${v}) + header (8)`);
+    assert.equal(padded % 2, 0, 'Target size must be 2-byte aligned');
+  }
+
+  const boundarySize = 1020;
   const header = new Uint8Array(12);
   const dv = new DataView(header.buffer);
   dv.setUint32(0, 20, false);
@@ -824,11 +834,13 @@ test('28. Cryptographic Padding Sub-Header Boundary Expansion', async () => {
   dv.setUint8(6, 0x79);
   dv.setUint8(7, 0x70);
 
-  const body = new Uint8Array(size - 12);
+  const body = new Uint8Array(boundarySize - 12);
   const blob = new Blob([header, body], { type: 'video/mp4' });
 
   const paddedBlob = await applyCryptographicPadding(blob, 'video/mp4');
-  assert.equal(paddedBlob.size, 524288 * 2, 'Must expand to next bucket when pad < HEADER_SIZE without recursion');
+  const expectedBoundary = computeDynamicPaddedSize(boundarySize);
+  assert.equal(paddedBlob.size, expectedBoundary, 'Boundary size must strictly resolve to expected Padme-H target');
+  assert.ok(paddedBlob.size - boundarySize >= 8, 'Must accommodate header without recursion');
 });
 
 test('29. median9 selection network equals full-sort median', async () => {

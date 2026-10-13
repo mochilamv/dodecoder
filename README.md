@@ -2,8 +2,6 @@
 
 Client-side media anti-forensics and reconstruction engine. Sanitizes images, video, and audio in browser memory to eliminate metadata, tracking vectors, and sensor fingerprints.
 
-Hosted on GitHub Pages: https://mochilamv.github.io/dodecoder/
-
 ## 1. Forensic Threat Model
 
 Standard metadata strippers remove tags while leaving tracking artifacts intact. Dodecoder mitigates:
@@ -34,7 +32,7 @@ Standard metadata strippers remove tags while leaving tracking artifacts intact.
 
 ### Zero-Remanence IO and Cryptography
 - Ephemeral AES-GCM OPFS Encryption: Wraps Origin Private File System (OPFS) streams with a volatile 256-bit RAM key. Encrypts data in chunks with random IVs before disk writes, explicit key zeroization on completion to defeat SSD wear-leveling remanence.
-- Cryptographic Container Padding: Final file size is deterministically quantized to a multiple of 524288 bytes (512KB). Random payloads generated via crypto.getRandomValues are injected into ignored container regions (free box for ISOBMFF, JUNK chunk for RIFF).
+- Cryptographic Container Padding: Dynamic Padme-H logarithmic quantization. Padded size adapts to payload magnitude while maintaining bounded relative overhead (<= 12.5% for payloads >= 32 B) and minimum container headroom. Random payloads generated via crypto.getRandomValues are injected into ignored container regions (free box for ISOBMFF, JUNK chunk for RIFF).
 - Standalone PKZIP Builder: Zero-trace zip serializer enforcing MS-DOS attributes and static timestamps (1980-01-01 00:00:00 UTC), preventing UNIX UID/GID and timestamp leakage.
 - Idempotent 128-bit SHA-256 Naming: Generates sanitized filenames from the first 32 characters of output SHA-256 without salt, ensuring deduplication idempotency.
 
