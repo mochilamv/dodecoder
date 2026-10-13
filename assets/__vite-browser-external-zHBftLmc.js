@@ -1,4 +1,4 @@
-import { t as e } from "./image.worker-DjJD1Dlf.js";
+import { t as e } from "./image.worker-DEHITWLE.js";
 var a = e(((t, r) => {
 	r.exports = {};
 }))();
