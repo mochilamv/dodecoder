@@ -273,7 +273,7 @@ test('8. Fast-Track Bypass Elimination: countSuspiciousMetadataTags permanently 
   assert.equal(
     'countSuspiciousMetadataTags' in markerParserExports,
     false,
-    'countSuspiciousMetadataTags must be permanently removed — Fast-Track Bypass is eliminated'
+    'countSuspiciousMetadataTags must be permanently removed - Fast-Track Bypass is eliminated'
   );
 
   // Verify inspectBinaryMarkers still exists as the sole forensic inspection entry point
@@ -291,7 +291,7 @@ test('9. Bypass Alias Elimination: stripAllMetadataSurgical permanently removed'
   assert.equal(
     'stripAllMetadataSurgical' in iccSanitizerExports,
     false,
-    'stripAllMetadataSurgical must be permanently removed — Bypass and Bloat Fallback is eliminated'
+    'stripAllMetadataSurgical must be permanently removed - Bypass and Bloat Fallback is eliminated'
   );
 
   // Verify stripDisplayColorProfiles still exists for post-encoding ICC purging
@@ -535,7 +535,7 @@ test('15. Mandatory One-Way Image Re-Synthesis and Hard Boundary Isolation of In
     await assert.rejects(
       () => sanitizeMedia(fakeFile, { defenseLevel: 'paranoid' }),
       /Image payload rejected from media pipeline/,
-      `sanitizeMedia must throw for ${img.name} — images must never enter in-place mutation`
+      `sanitizeMedia must throw for ${img.name} - images must never enter in-place mutation`
     );
   }
 });
@@ -878,4 +878,7 @@ test('29. median9 selection network equals full-sort median', async () => {
   v.fill(0);
   assert.equal(median9(v), 0);
 });
+
+import './batch2-image-pipeline.test';
+
 

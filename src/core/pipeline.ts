@@ -2,6 +2,9 @@ import { DefenseLevel, OutputFormat, SanitizedResult } from './types';
 import { sanitizeImage } from './image/image-sanitizer';
 import { sanitizeMedia } from './media/media-sanitizer';
 import { applyCryptographicPadding } from './forensic/crypto-padding';
+import { finalizeSanitizedOutput } from './forensic/finalize-output';
+
+export { finalizeSanitizedOutput } from './forensic/finalize-output';
 
 export interface PipelineOptions {
   defenseLevel?: DefenseLevel;
@@ -37,7 +40,19 @@ export async function processMediaFile(
       quality: isLossless ? undefined : quality,
     }, onProgress);
     const paddedBlob = await applyCryptographicPadding(sanitized.blob, sanitized.blob.type, true);
-    return { ...sanitized, blob: paddedBlob };
+    const finalized = await finalizeSanitizedOutput(paddedBlob, paddedBlob.type);
+    if (finalized.sha256 === sanitized.auditBefore.sha256) {
+      throw new Error('Mandatory re-synthesis invariant violated: output SHA-256 must diverge from input');
+    }
+    return {
+      ...sanitized,
+      blob: finalized.blob,
+      sanitizedName: finalized.sanitizedName,
+      sanitizedSize: finalized.sanitizedSize,
+      format: finalized.format,
+      sha256: finalized.sha256,
+      auditAfter: finalized.auditAfter,
+    };
   }
 
   if (isVideoOrAudio) {
@@ -45,7 +60,16 @@ export async function processMediaFile(
       defenseLevel,
     }, onProgress);
     const paddedBlob = await applyCryptographicPadding(sanitized.blob, sanitized.blob.type);
-    return { ...sanitized, blob: paddedBlob };
+    const finalized = await finalizeSanitizedOutput(paddedBlob, paddedBlob.type);
+    return {
+      ...sanitized,
+      blob: finalized.blob,
+      sanitizedName: finalized.sanitizedName,
+      sanitizedSize: finalized.sanitizedSize,
+      format: finalized.format,
+      sha256: finalized.sha256,
+      auditAfter: finalized.auditAfter,
+    };
   }
 
   // No fallback: unrecognized file types are strictly rejected

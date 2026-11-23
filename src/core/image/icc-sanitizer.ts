@@ -201,12 +201,27 @@ const WEBP_VP8L = 0x5650384c; // 'VP8L'
 const WEBP_ANIM = 0x414e494d; // 'ANIM'
 const WEBP_ANMF = 0x414e4d46; // 'ANMF'
 
+// WebP VP8X Flag Bits (RFC 9649 Section 2.7)
+const WEBP_VP8X_FLAG_ICC = 0x20;
+const WEBP_VP8X_FLAG_ALPHA = 0x10;
+const WEBP_VP8X_FLAG_EXIF = 0x08;
+const WEBP_VP8X_FLAG_XMP = 0x04;
+const WEBP_VP8X_FLAG_ANIM = 0x02;
+const WEBP_VP8X_PAYLOAD_LEN = 10;
+
+interface WebpChunkRef {
+  offset: number;
+  payloadLen: number;
+  type: number;
+}
+
 /**
- * Strips ICCP, EXIF, and XMP chunks from a WebP stream.
- * Normalizes container according to the Intelligent Auto-Chunking Matrix:
- * - Pure VP8 (Lossy): omits VP8X header when no alpha channel exists.
- * - Pure VP8L (Lossless): omits VP8X header when no alpha channel exists.
- * - Targeted VP8X (Extended): retains VP8X with flags strictly set to 0x10 for ALPH.
+ * Strips ICCP, EXIF, XMP, and non-whitelisted chunks from a WebP RIFF stream.
+ * Enforces RFC 9649 / RIFF framing:
+ * - Chunk size fields exclude trailing pad bytes; odd chunks emit an explicit 0x00 pad byte.
+ * - Tolerates a missing trailing pad byte on an odd final chunk at EOF by clamping read bounds.
+ * - Recomputes the RIFF header size as (totalChunksBytes + 4), always even.
+ * - Keeps VP8X flags strictly consistent with the remaining chunks (omitting VP8X for Simple WebP).
  */
 function stripWebpColorProfiles(input: Uint8Array): Uint8Array {
   if (input.length < 12) return input;
@@ -216,71 +231,97 @@ function stripWebpColorProfiles(input: Uint8Array): Uint8Array {
     return input;
   }
 
-  // Pass 1: Inspect chunks to detect alpha transparency and animation
-  let hasAlph = false;
-  let hasAnim = false;
-  let vp8xChunk: { offset: number; totalLen: number } | null = null;
-  const safeChunks: Array<{ offset: number; totalLen: number; type: number }> = [];
+  // Clamp parse limit to declared RIFF container boundary to ignore trailing garbage past RIFF EOF
+  const declaredRiffSize = inView.getUint32(4, true);
+  const riffEnd = declaredRiffSize >= 4 ? 8 + declaredRiffSize : input.length;
+  const parseLimit = Math.min(input.length, riffEnd);
+
+  // Pass 1: Walk RIFF chunks under strict whitelist and EOF clamping
+  let vp8xChunk: WebpChunkRef | null = null;
+  const safeChunks: WebpChunkRef[] = [];
 
   let readPos = 12;
-  const len = input.length;
-
-  while (readPos + 8 <= len) {
+  while (readPos + 8 <= parseLimit) {
     const chunkType = inView.getUint32(readPos, false);
     const chunkLen = inView.getUint32(readPos + 4, true);
-    const paddedLen = chunkLen + (chunkLen % 2);
-    const totalChunkLen = 8 + paddedLen;
+    const payloadEnd = readPos + 8 + chunkLen;
 
-    if (readPos + totalChunkLen > len) break;
+    // Stop cleanly if chunk payload exceeds container bounds
+    if (payloadEnd > parseLimit) break;
 
-    if (chunkType === WEBP_ALPH) {
-      hasAlph = true;
-      safeChunks.push({ offset: readPos, totalLen: totalChunkLen, type: chunkType });
-    } else if (chunkType === WEBP_ANIM || chunkType === WEBP_ANMF) {
-      hasAnim = true;
-      safeChunks.push({ offset: readPos, totalLen: totalChunkLen, type: chunkType });
-    } else if (chunkType === WEBP_VP8X) {
-      vp8xChunk = { offset: readPos, totalLen: totalChunkLen };
-    } else if (chunkType === WEBP_VP8_ || chunkType === WEBP_VP8L) {
-      safeChunks.push({ offset: readPos, totalLen: totalChunkLen, type: chunkType });
+    const padLen = chunkLen & 1;
+    const nextPos = payloadEnd + padLen;
+    // Tolerate omitted pad byte on an odd final chunk at EOF without over-reading
+    const clampedNextPos = nextPos > parseLimit ? parseLimit : nextPos;
+
+    if (chunkType === WEBP_VP8X) {
+      if (chunkLen === WEBP_VP8X_PAYLOAD_LEN && vp8xChunk === null) {
+        vp8xChunk = { offset: readPos, payloadLen: chunkLen, type: chunkType };
+      }
+    } else if (
+      chunkType === WEBP_ALPH ||
+      chunkType === WEBP_ANIM ||
+      chunkType === WEBP_ANMF ||
+      chunkType === WEBP_VP8_ ||
+      chunkType === WEBP_VP8L
+    ) {
+      safeChunks.push({ offset: readPos, payloadLen: chunkLen, type: chunkType });
     } else if (chunkType === WEBP_ICCP || chunkType === WEBP_EXIF || chunkType === WEBP_XMP) {
-      // Discard forbidden metadata chunks
-    } else {
-      // Retain other safe payload chunks
-      safeChunks.push({ offset: readPos, totalLen: totalChunkLen, type: chunkType });
+      // Explicitly strip forbidden metadata chunks
     }
+    // Any other unrecognized FourCC is discarded under strict whitelist policy
 
-    readPos += totalChunkLen;
+    readPos = clampedNextPos;
   }
 
-  // Pass 2: Reconstruct minimal container layout
-  const output = new Uint8Array(input.length);
+  // Pass 2: Recompute exact output layout and enforce VP8X flag-to-chunk consistency
+  const remainingHasAlph = safeChunks.some(c => c.type === WEBP_ALPH);
+  const remainingHasAnim = safeChunks.some(c => c.type === WEBP_ANIM || c.type === WEBP_ANMF);
+  const remainingHasIcc = safeChunks.some(c => c.type === WEBP_ICCP);
+  const remainingHasExif = safeChunks.some(c => c.type === WEBP_EXIF);
+  const remainingHasXmp = safeChunks.some(c => c.type === WEBP_XMP);
+
+  const emitVp8x = (remainingHasAlph || remainingHasAnim) && vp8xChunk !== null;
+  let totalChunksBytes = emitVp8x ? 8 + WEBP_VP8X_PAYLOAD_LEN : 0;
+  for (const chunk of safeChunks) {
+    totalChunksBytes += 8 + chunk.payloadLen + (chunk.payloadLen & 1);
+  }
+
+  const totalOutBytes = 12 + totalChunksBytes;
+  const output = new Uint8Array(totalOutBytes);
   output.set(input.subarray(0, 12), 0);
   const outView = new DataView(output.buffer, output.byteOffset, output.byteLength);
   let writePos = 12;
 
-  const requiresVp8x = hasAlph || hasAnim;
-
-  if (requiresVp8x && vp8xChunk) {
-    // Targeted VP8X: Flags set strictly to 0x10 for ALPH (or 0x02 for animation)
-    output.set(input.subarray(vp8xChunk.offset, vp8xChunk.offset + vp8xChunk.totalLen), writePos);
+  if (emitVp8x && vp8xChunk !== null) {
+    const vp8xBytes = 8 + WEBP_VP8X_PAYLOAD_LEN;
+    output.set(input.subarray(vp8xChunk.offset, vp8xChunk.offset + vp8xBytes), writePos);
     let flags = 0;
-    if (hasAlph) flags |= 0x10;
-    if (hasAnim) flags |= 0x02;
+    if (remainingHasIcc) flags |= WEBP_VP8X_FLAG_ICC;
+    if (remainingHasAlph) flags |= WEBP_VP8X_FLAG_ALPHA;
+    if (remainingHasExif) flags |= WEBP_VP8X_FLAG_EXIF;
+    if (remainingHasXmp) flags |= WEBP_VP8X_FLAG_XMP;
+    if (remainingHasAnim) flags |= WEBP_VP8X_FLAG_ANIM;
     output[writePos + 8] = flags;
-    writePos += vp8xChunk.totalLen;
+    output[writePos + 9] = 0;
+    output[writePos + 10] = 0;
+    output[writePos + 11] = 0;
+    writePos += vp8xBytes;
   }
-  // When requiresVp8x is false, VP8X header is omitted, generating Pure VP8 or Pure VP8L
 
   for (const chunk of safeChunks) {
-    output.set(input.subarray(chunk.offset, chunk.offset + chunk.totalLen), writePos);
-    writePos += chunk.totalLen;
+    const rawChunkBytes = 8 + chunk.payloadLen;
+    output.set(input.subarray(chunk.offset, chunk.offset + rawChunkBytes), writePos);
+    writePos += rawChunkBytes;
+    if ((chunk.payloadLen & 1) === 1) {
+      output[writePos++] = 0x00;
+    }
   }
 
-  // Update RIFF total size
-  outView.setUint32(4, writePos - 8, true);
+  // RIFF size = total chunk bytes + 4 ('WEBP'), guaranteed even
+  outView.setUint32(4, totalChunksBytes + 4, true);
 
-  return output.subarray(0, writePos);
+  return output;
 }
 
 
