@@ -1,23 +1,54 @@
 import { QueueItem, SanitizedResult } from '../core/types';
 import { processMediaFile } from '../core/pipeline';
 import { createSanitizedZipBundle, triggerEphemeralDownload } from '../core/utils/zip-export';
-import { wipeBuffer } from '../core/utils/memory';
+import { revokeUrls } from '../core/utils/memory';
+import { isAbortError } from '../core/image/bitmap-lifecycle';
 import { renderSettingsPanel } from './components/settings-panel';
 import { renderDropzone } from './components/dropzone';
 import { renderQueueList } from './components/queue-list';
 import { renderAuditModal } from './components/audit-modal';
 import { renderLegalModal } from './components/legal-modal';
 
+export interface DoDecoderAppDeps {
+  processFile?: typeof processMediaFile;
+  createZipBundle?: typeof createSanitizedZipBundle;
+  triggerDownload?: (blob: Blob, fileName: string, onRevoked?: () => void) => string | void;
+}
+
 export class DoDecoderApp {
   private root: HTMLElement;
   private queue: QueueItem[] = [];
   private activeAuditModal: HTMLElement | null = null;
   private activeLegalModal: HTMLElement | null = null;
-  private isProcessingQueue = false;
+  private queueEpoch = 0;
+  private processingEpoch: number | null = null;
+  private activeAbortController: AbortController | null = null;
+  private activeObjectUrls = new Set<string>();
+  private activeBitmaps = new Set<ImageBitmap>();
+  private readonly deps: Required<DoDecoderAppDeps>;
 
-  constructor(root: HTMLElement) {
+  constructor(root: HTMLElement, deps: DoDecoderAppDeps = {}) {
     this.root = root;
+    this.deps = {
+      processFile: deps.processFile ?? processMediaFile,
+      createZipBundle: deps.createZipBundle ?? createSanitizedZipBundle,
+      triggerDownload: deps.triggerDownload ?? triggerEphemeralDownload,
+    };
     this.render();
+  }
+
+  public getQueue(): readonly QueueItem[] {
+    return this.queue;
+  }
+
+  public registerObjectUrl(url: string): void {
+    if (url) {
+      this.activeObjectUrls.add(url);
+    }
+  }
+
+  public registerManagedBitmap(bitmap: ImageBitmap): void {
+    this.activeBitmaps.add(bitmap);
   }
 
   public render(): void {
@@ -79,46 +110,70 @@ export class DoDecoderApp {
 
     this.queue.push(...newItems);
     this.render();
-    this.processQueue();
+    void this.processQueue();
   }
 
   private async processQueue(): Promise<void> {
-    if (this.isProcessingQueue) return;
-    this.isProcessingQueue = true;
+    const epoch = this.queueEpoch;
+    if (this.processingEpoch === epoch) return;
+    this.processingEpoch = epoch;
 
-    for (let i = 0; i < this.queue.length; i++) {
-      const item = this.queue[i];
-      if (item.status !== 'idle') continue;
+    try {
+      while (this.queueEpoch === epoch) {
+        const item = this.queue.find(q => q.status === 'idle');
+        if (!item) break;
 
-      item.status = 'analyzing';
-      item.progress = 25;
-      this.updateQueueView();
+        item.status = 'analyzing';
+        item.progress = 25;
+        this.updateQueueView();
 
-      try {
-        item.status = 'processing';
-        const result = await processMediaFile(
-          item.file,
-          {
-            quality: 0.60,
-          },
-          pct => {
-            item.progress = pct;
-            this.updateQueueView();
+        const controller = new AbortController();
+        this.activeAbortController = controller;
+
+        try {
+          item.status = 'processing';
+          const result = await this.deps.processFile(
+            item.file,
+            {
+              quality: 0.60,
+              signal: controller.signal,
+            },
+            pct => {
+              if (this.queueEpoch !== epoch || controller.signal.aborted) return;
+              item.progress = pct;
+              this.updateQueueView();
+            }
+          );
+
+          // Discard late results if queue was cleared while this item was in-flight
+          if (this.queueEpoch !== epoch || controller.signal.aborted) {
+            break;
           }
-        );
 
-        item.status = 'done';
-        item.progress = 100;
-        item.result = result;
-      } catch (err: any) {
-        item.status = 'error';
-        item.error = err.message || 'Processing failed';
+          item.status = 'done';
+          item.progress = 100;
+          item.result = result;
+        } catch (err: any) {
+          if (this.queueEpoch !== epoch || controller.signal.aborted || isAbortError(err)) {
+            break;
+          }
+          item.status = 'error';
+          item.error = err?.message || 'Processing failed';
+        } finally {
+          if (this.activeAbortController === controller) {
+            this.activeAbortController = null;
+          }
+        }
+
+        if (this.queueEpoch === epoch) {
+          this.updateQueueView();
+        }
       }
-
-      this.updateQueueView();
+    } finally {
+      if (this.processingEpoch === epoch) {
+        this.processingEpoch = null;
+      }
     }
-
-    this.isProcessingQueue = false;
   }
 
   private updateQueueView(): void {
@@ -136,17 +191,34 @@ export class DoDecoderApp {
     }
   }
 
+  private triggerTrackedDownload(blob: Blob, fileName: string): void {
+    let trackedUrl: string | undefined;
+    const maybeUrl = this.deps.triggerDownload(blob, fileName, () => {
+      if (trackedUrl) {
+        this.activeObjectUrls.delete(trackedUrl);
+      }
+    });
+    if (typeof maybeUrl === 'string' && maybeUrl.length > 0) {
+      trackedUrl = maybeUrl;
+      this.activeObjectUrls.add(maybeUrl);
+    }
+  }
+
   private handleDownloadSingle(item: QueueItem): void {
     if (!item.result) return;
-    triggerEphemeralDownload(item.result.blob, item.result.sanitizedName);
+    this.triggerTrackedDownload(item.result.blob, item.result.sanitizedName);
   }
 
   private async handleDownloadAllZip(): Promise<void> {
-    const completed = this.queue.filter(q => q.status === 'done' && q.result).map(q => q.result as SanitizedResult);
+    const epoch = this.queueEpoch;
+    const completed = this.queue
+      .filter(q => q.status === 'done' && q.result)
+      .map(q => q.result as SanitizedResult);
     if (completed.length === 0) return;
 
-    const { zipBlob, zipFileName } = await createSanitizedZipBundle(completed);
-    triggerEphemeralDownload(zipBlob, zipFileName);
+    const { zipBlob, zipFileName } = await this.deps.createZipBundle(completed);
+    if (this.queueEpoch !== epoch) return;
+    this.triggerTrackedDownload(zipBlob, zipFileName);
   }
 
   private handleInspectForensics(item: QueueItem): void {
@@ -176,13 +248,44 @@ export class DoDecoderApp {
     document.body.appendChild(this.activeLegalModal);
   }
 
-  private handleClearQueue(): void {
+  public handleClearQueue(): void {
+    // Advance epoch first so any late progress, job resolution, or ZIP export is discarded
+    this.queueEpoch++;
+    this.processingEpoch = null;
+
+    if (this.activeAbortController) {
+      this.activeAbortController.abort('Queue cleared');
+      this.activeAbortController = null;
+    }
+
+    // Release item object references without creating placebo Blob.arrayBuffer() copies
     for (const item of this.queue) {
-      if (item.result) {
-        item.result.blob.arrayBuffer().then(buf => wipeBuffer(buf)).catch(() => {});
-      }
+      item.result = undefined;
+      item.error = undefined;
     }
     this.queue = [];
+
+    if (this.activeObjectUrls.size > 0) {
+      revokeUrls(Array.from(this.activeObjectUrls));
+      this.activeObjectUrls.clear();
+    }
+
+    if (this.activeBitmaps.size > 0) {
+      for (const bitmap of this.activeBitmaps) {
+        try {
+          bitmap.close();
+        } catch {
+          // Ignore already-closed or detached bitmaps
+        }
+      }
+      this.activeBitmaps.clear();
+    }
+
+    if (this.activeAuditModal) {
+      this.activeAuditModal.remove();
+      this.activeAuditModal = null;
+    }
+
     this.render();
   }
 }

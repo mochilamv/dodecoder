@@ -3,6 +3,7 @@ import { sanitizeImage } from './image/image-sanitizer';
 import { sanitizeMedia } from './media/media-sanitizer';
 import { applyCryptographicPadding } from './forensic/crypto-padding';
 import { finalizeSanitizedOutput } from './forensic/finalize-output';
+import { createAbortError } from './image/bitmap-lifecycle';
 
 export { finalizeSanitizedOutput } from './forensic/finalize-output';
 
@@ -10,6 +11,7 @@ export interface PipelineOptions {
   defenseLevel?: DefenseLevel;
   outputFormat?: OutputFormat;
   quality?: number;
+  signal?: AbortSignal;
 }
 
 /**
@@ -31,6 +33,10 @@ export async function processMediaFile(
   const isImage = mime.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp|gif|tiff)$/i.test(name);
   const isVideoOrAudio = mime.startsWith('video/') || mime.startsWith('audio/') || /\.(mp4|mov|mkv|webm|mp3|wav|ogg|aac|m4a)$/i.test(name);
 
+  if (options.signal?.aborted) {
+    throw createAbortError(options.signal.reason);
+  }
+
   if (isImage) {
     const isLossless = mime === 'image/png' || name.toLowerCase().endsWith('.png');
     const outputFormat = isLossless ? 'image/png' : 'image/webp';
@@ -38,9 +44,19 @@ export async function processMediaFile(
       defenseLevel,
       outputFormat,
       quality: isLossless ? undefined : quality,
+      signal: options.signal,
     }, onProgress);
+    if (options.signal?.aborted) {
+      throw createAbortError(options.signal.reason);
+    }
     const paddedBlob = await applyCryptographicPadding(sanitized.blob, sanitized.blob.type, true);
+    if (options.signal?.aborted) {
+      throw createAbortError(options.signal.reason);
+    }
     const finalized = await finalizeSanitizedOutput(paddedBlob, paddedBlob.type);
+    if (options.signal?.aborted) {
+      throw createAbortError(options.signal.reason);
+    }
     if (finalized.sha256 === sanitized.auditBefore.sha256) {
       throw new Error('Mandatory re-synthesis invariant violated: output SHA-256 must diverge from input');
     }

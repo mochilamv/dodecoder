@@ -667,34 +667,22 @@ test('21. Electrical Network Frequency (ENF) Digital Notch Rejection Filters', a
   assert.ok(rmsAfter < rmsBefore * 0.1, `ENF 50Hz tone must be attenuated by at least 20dB. Before: ${rmsBefore}, After: ${rmsAfter}`);
 });
 
-test('22. Standalone WASM Deterministic WebP Image Encoder', async () => {
-  const { encodeDeterministicWebp } = await import('../src/core/image/wasm-encoder');
-  
-  const width = 4, height = 4;
-  const rgba = new Uint8Array(width * height * 4);
-  for (let i = 0; i < rgba.length; i += 4) {
-    rgba[i] = (i * 17) % 256;
-    rgba[i + 1] = (i * 31) % 256;
-    rgba[i + 2] = (i * 47) % 256;
-    rgba[i + 3] = 255;
-  }
+test('22. Pure TypeScript Zero-WASM Architecture Invariant (AUD-23)', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const root = process.cwd();
 
-  const encoded1 = await encodeDeterministicWebp(rgba, width, height);
-  const encoded2 = await encodeDeterministicWebp(rgba, width, height);
-
-  // Invariant: Cross-platform deterministic bitstream generation
-  assert.equal(encoded1.length, encoded2.length, 'Bitstream lengths must be identical');
-  for (let i = 0; i < encoded1.length; i++) {
-    assert.equal(encoded1[i], encoded2[i], `Byte at offset ${i} must match identically across encoder passes`);
-  }
-
-  // Validate WebP RIFF VP8L container signature
-  const riff = String.fromCharCode(...encoded1.subarray(0, 4));
-  const webp = String.fromCharCode(...encoded1.subarray(8, 12));
-  const vp8l = String.fromCharCode(...encoded1.subarray(12, 16));
-  assert.equal(riff, 'RIFF');
-  assert.equal(webp, 'WEBP');
-  assert.equal(vp8l, 'VP8L');
+  // Orphan opaque WASM binary and dead loader were removed in Batch 1 (AUD-23)
+  assert.equal(
+    fs.existsSync(path.join(root, 'src', 'core', 'wasm', 'deterministic_encoder.wasm')),
+    false,
+    'Orphan deterministic_encoder.wasm binary must not exist'
+  );
+  assert.equal(
+    fs.existsSync(path.join(root, 'src', 'core', 'image', 'wasm-encoder.ts')),
+    false,
+    'Dead wasm-encoder.ts loader must not exist'
+  );
 });
 
 test('23. Poisson-Gaussian Heteroscedastic CMOS Noise Variance Model', async () => {
@@ -880,5 +868,6 @@ test('29. median9 selection network equals full-sort median', async () => {
 });
 
 import './batch2-image-pipeline.test';
+import './batch1-security-reliability.test';
 
 

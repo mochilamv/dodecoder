@@ -1,7 +1,163 @@
 import { SanitizedResult } from '../../core/types';
-import { icons } from '../icons';
+import { formatBytes, sanitizeDisplayText } from './queue-list';
+
+export interface AuditMetricViewModel {
+  label: string;
+  beforeVal: string;
+  afterVal: string;
+  beforeColorClass: string;
+  afterColorClass: string;
+}
+
+export interface AuditModalViewModel {
+  originalName: string;
+  originalSizeLabel: string;
+  beforeSha256: string;
+  sanitizedName: string;
+  sanitizedSizeLabel: string;
+  afterSha256: string;
+  metrics: AuditMetricViewModel[];
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function createMetricViewModel(
+  label: string,
+  beforeRaw: string,
+  afterRaw: string
+): AuditMetricViewModel {
+  const safeLabel = sanitizeDisplayText(label);
+  const beforeVal = sanitizeDisplayText(beforeRaw);
+  const afterVal = sanitizeDisplayText(afterRaw);
+  const isAfterClean = afterVal === 'Clean' || afterVal === 'Applied';
+  return {
+    label: safeLabel,
+    beforeVal,
+    afterVal,
+    beforeColorClass: beforeVal !== 'Clean' && beforeVal !== 'N/A' ? 'text-[#FF4444]' : 'text-[#FFFFFF]',
+    afterColorClass: isAfterClean ? 'text-[#00FF00]' : 'text-[#FFFFFF]',
+  };
+}
+
+export function buildAuditModalViewModel(result: SanitizedResult): AuditModalViewModel {
+  const before = result.auditBefore;
+  const after = result.auditAfter;
+
+  return {
+    originalName: sanitizeDisplayText(result.originalName),
+    originalSizeLabel: formatBytes(result.originalSize),
+    beforeSha256: sanitizeDisplayText(before.sha256),
+    sanitizedName: sanitizeDisplayText(result.sanitizedName),
+    sanitizedSizeLabel: formatBytes(result.sanitizedSize),
+    afterSha256: sanitizeDisplayText(after.sha256),
+    metrics: [
+      createMetricViewModel('Format / MIME', before.mimeType, after.mimeType),
+      createMetricViewModel('EXIF / TIFF', before.hasExif ? 'Detected' : 'Clean', after.hasExif ? 'Detected' : 'Clean'),
+      createMetricViewModel('GPS Coordinates', before.hasGps ? 'Exposed' : 'Clean', after.hasGps ? 'Exposed' : 'Clean'),
+      createMetricViewModel('MakerNotes / OEM', before.hasMakerNotes ? 'Exposed' : 'Clean', after.hasMakerNotes ? 'Exposed' : 'Clean'),
+      createMetricViewModel('Thumbnail Leak', before.hasThumbnail ? 'Exposed' : 'Clean', after.hasThumbnail ? 'Exposed' : 'Clean'),
+      createMetricViewModel('Steganography Deep Decon', 'N/A', result.isDeepDecontaminated ? 'Applied' : 'Skipped'),
+    ],
+  };
+}
+
+function createCloseIcon(): SVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'w-5 h-5 inline-block');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const line1 = document.createElementNS(SVG_NS, 'line');
+  line1.setAttribute('x1', '18');
+  line1.setAttribute('y1', '6');
+  line1.setAttribute('x2', '6');
+  line1.setAttribute('y2', '18');
+  svg.appendChild(line1);
+
+  const line2 = document.createElementNS(SVG_NS, 'line');
+  line2.setAttribute('x1', '6');
+  line2.setAttribute('y1', '6');
+  line2.setAttribute('x2', '18');
+  line2.setAttribute('y2', '18');
+  svg.appendChild(line2);
+
+  return svg;
+}
+
+function createSummaryColumn(
+  headingText: string,
+  name: string,
+  nameColorClass: string,
+  sizeLabel: string,
+  sizeColorClass: string,
+  sha256: string,
+  shaTitle: string
+): HTMLElement {
+  const col = document.createElement('div');
+  col.className = 'space-y-1';
+
+  const heading = document.createElement('div');
+  heading.className = 'text-[10px] text-[#FFFFFF] font-mono uppercase';
+  heading.textContent = headingText;
+  col.appendChild(heading);
+
+  const nameEl = document.createElement('div');
+  nameEl.className = `text-sm font-mono ${nameColorClass} truncate`;
+  nameEl.setAttribute('title', name);
+  nameEl.textContent = name;
+  col.appendChild(nameEl);
+
+  const sizeEl = document.createElement('div');
+  sizeEl.className = `text-xs ${sizeColorClass} font-mono`;
+  sizeEl.textContent = sizeLabel;
+  col.appendChild(sizeEl);
+
+  const hashEl = document.createElement('div');
+  hashEl.className = `text-[10px] ${sizeColorClass} font-mono break-all mt-1`;
+  hashEl.setAttribute('title', shaTitle);
+  hashEl.textContent = sha256;
+  col.appendChild(hashEl);
+
+  return col;
+}
+
+function createMetricElement(metric: AuditMetricViewModel): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'flex flex-col space-y-1';
+
+  const labelEl = document.createElement('div');
+  labelEl.className = 'text-[10px] text-[#FFFFFF] font-mono tracking-wider uppercase';
+  labelEl.textContent = metric.label;
+  wrapper.appendChild(labelEl);
+
+  const row = document.createElement('div');
+  row.className = 'flex items-center gap-2 text-xs font-mono';
+
+  const beforeSpan = document.createElement('span');
+  beforeSpan.className = metric.beforeColorClass;
+  beforeSpan.textContent = metric.beforeVal;
+  row.appendChild(beforeSpan);
+
+  const arrowSpan = document.createElement('span');
+  arrowSpan.className = 'text-[#FFFFFF]';
+  arrowSpan.textContent = '->';
+  row.appendChild(arrowSpan);
+
+  const afterSpan = document.createElement('span');
+  afterSpan.className = `${metric.afterColorClass} font-bold`;
+  afterSpan.textContent = metric.afterVal;
+  row.appendChild(afterSpan);
+
+  wrapper.appendChild(row);
+  return wrapper;
+}
 
 export function renderAuditModal(result: SanitizedResult, onClose: () => void): HTMLElement {
+  const vm = buildAuditModalViewModel(result);
+
   const overlay = document.createElement('div');
   overlay.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#000000]/90 backdrop-blur-sm';
 
@@ -9,54 +165,75 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
   modal.className = 'w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-[#000000] text-[#FFFFFF] p-6 focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2';
   modal.setAttribute('tabindex', '-1');
 
-  const before = result.auditBefore;
-  const after = result.auditAfter;
+  // Header
+  const header = document.createElement('div');
+  header.className = 'flex items-center justify-between mb-6';
 
-  modal.innerHTML = `
-    <div class="flex items-center justify-between mb-6">
-      <h2 class="text-lg font-mono font-bold tracking-wider text-[#FFFFFF]">Forensic Audit Report</h2>
-      <button id="btn-close-modal" class="p-2 text-[#FFFFFF] hover:text-[#FF4444] transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2" aria-label="Close modal">
-        ${icons.close}
-      </button>
-    </div>
+  const title = document.createElement('h2');
+  title.className = 'text-lg font-mono font-bold tracking-wider text-[#FFFFFF]';
+  title.textContent = 'Forensic Audit Report';
+  header.appendChild(title);
 
-    <div class="space-y-8">
-      <!-- Overview -->
-      <div class="grid grid-cols-2 gap-4">
-        <div class="space-y-1">
-          <div class="text-[10px] text-[#FFFFFF] font-mono uppercase">Original</div>
-          <div class="text-sm font-mono text-[#FFFFFF] truncate" title="${result.originalName}">${result.originalName}</div>
-          <div class="text-xs text-[#FF4444] font-mono">${formatBytes(result.originalSize)}</div>
-          <div class="text-[10px] text-[#FF4444] font-mono break-all mt-1" title="Original SHA-256">${before.sha256}</div>
-        </div>
-        <div class="space-y-1">
-          <div class="text-[10px] text-[#FFFFFF] font-mono uppercase">Sanitized</div>
-          <div class="text-sm font-mono text-[#00FF00] truncate" title="${result.sanitizedName}">${result.sanitizedName}</div>
-          <div class="text-xs text-[#00FF00] font-mono">${formatBytes(result.sanitizedSize)}</div>
-          <div class="text-[10px] text-[#00FF00] font-mono break-all mt-1" title="Sanitized SHA-256">${after.sha256}</div>
-        </div>
-      </div>
+  const closeBtn = document.createElement('button');
+  closeBtn.id = 'btn-close-modal';
+  closeBtn.type = 'button';
+  closeBtn.className = 'p-2 text-[#FFFFFF] hover:text-[#FF4444] transition-colors cursor-pointer focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-2';
+  closeBtn.setAttribute('aria-label', 'Close modal');
+  closeBtn.appendChild(createCloseIcon());
+  closeBtn.addEventListener('click', onClose);
+  header.appendChild(closeBtn);
 
-      <!-- Payload Diff -->
-      <div class="space-y-4">
-        <h3 class="text-xs font-mono font-bold tracking-widest text-[#FFFFFF] uppercase">Vector Analysis</h3>
-        
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          ${renderMetric('Format / MIME', before.mimeType, after.mimeType)}
-          ${renderMetric('EXIF / TIFF', before.hasExif ? 'Detected' : 'Clean', after.hasExif ? 'Detected' : 'Clean')}
-          ${renderMetric('GPS Coordinates', before.hasGps ? 'Exposed' : 'Clean', after.hasGps ? 'Exposed' : 'Clean')}
-          ${renderMetric('MakerNotes / OEM', before.hasMakerNotes ? 'Exposed' : 'Clean', after.hasMakerNotes ? 'Exposed' : 'Clean')}
-          ${renderMetric('Thumbnail Leak', before.hasThumbnail ? 'Exposed' : 'Clean', after.hasThumbnail ? 'Exposed' : 'Clean')}
-          ${renderMetric('Steganography Deep Decon', 'N/A', !!result.isDeepDecontaminated ? 'Applied' : 'Skipped')}
-        </div>
-      </div>
-    </div>
-  `;
+  modal.appendChild(header);
 
-  const closeBtn = modal.querySelector('#btn-close-modal');
-  if (closeBtn) {
-    closeBtn.addEventListener('click', onClose);
+  // Content body
+  const body = document.createElement('div');
+  body.className = 'space-y-8';
+
+  // Overview
+  const overview = document.createElement('div');
+  overview.className = 'grid grid-cols-2 gap-4';
+  overview.appendChild(
+    createSummaryColumn(
+      'Original',
+      vm.originalName,
+      'text-[#FFFFFF]',
+      vm.originalSizeLabel,
+      'text-[#FF4444]',
+      vm.beforeSha256,
+      'Original SHA-256'
+    )
+  );
+  overview.appendChild(
+    createSummaryColumn(
+      'Sanitized',
+      vm.sanitizedName,
+      'text-[#00FF00]',
+      vm.sanitizedSizeLabel,
+      'text-[#00FF00]',
+      vm.afterSha256,
+      'Sanitized SHA-256'
+    )
+  );
+  body.appendChild(overview);
+
+  // Payload Diff
+  const diffSection = document.createElement('div');
+  diffSection.className = 'space-y-4';
+
+  const diffHeading = document.createElement('h3');
+  diffHeading.className = 'text-xs font-mono font-bold tracking-widest text-[#FFFFFF] uppercase';
+  diffHeading.textContent = 'Vector Analysis';
+  diffSection.appendChild(diffHeading);
+
+  const metricsGrid = document.createElement('div');
+  metricsGrid.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4';
+  for (const metric of vm.metrics) {
+    metricsGrid.appendChild(createMetricElement(metric));
   }
+  diffSection.appendChild(metricsGrid);
+
+  body.appendChild(diffSection);
+  modal.appendChild(body);
 
   overlay.addEventListener('click', e => {
     if (e.target === overlay) onClose();
@@ -68,29 +245,4 @@ export function renderAuditModal(result: SanitizedResult, onClose: () => void): 
   setTimeout(() => modal.focus(), 10);
 
   return overlay;
-}
-
-function renderMetric(label: string, beforeVal: string, afterVal: string): string {
-  const isAfterClean = afterVal === 'Clean' || afterVal === 'Applied';
-  const afterColor = isAfterClean ? 'text-[#00FF00]' : 'text-[#FFFFFF]';
-  const beforeColor = (beforeVal !== 'Clean' && beforeVal !== 'N/A') ? 'text-[#FF4444]' : 'text-[#FFFFFF]';
-
-  return `
-    <div class="flex flex-col space-y-1">
-      <div class="text-[10px] text-[#FFFFFF] font-mono tracking-wider uppercase">${label}</div>
-      <div class="flex items-center gap-2 text-xs font-mono">
-        <span class="${beforeColor}">${beforeVal}</span>
-        <span class="text-[#FFFFFF]">-&gt;</span>
-        <span class="${afterColor} font-bold">${afterVal}</span>
-      </div>
-    </div>
-  `;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
