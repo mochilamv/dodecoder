@@ -773,7 +773,7 @@ test('AUD-03 [MOCK-CONTRACT]: sanitizeImage closes every created ImageBitmap exa
   try {
     const file = new File([makeValidMinimalJpeg(16, 16)], 'sample.jpg', { type: 'image/jpeg' });
     await assert.rejects(
-      () => sanitizeImage(file, { defenseLevel: 'paranoid', outputFormat: 'image/webp' }),
+      () => sanitizeImage(file, { defenseLevel: 'paranoid' }),
       /MOCK_DRAW_FAILURE_1/
     );
 
@@ -947,7 +947,7 @@ test('AUD-03 [MOCK-CONTRACT]: ImageBitmap.close() covers success, downscale-thro
     try {
       const file = new File([makeValidMinimalJpeg(16, 16)], 'sample.jpg', { type: 'image/jpeg' });
       await assert.rejects(
-        () => sanitizeImage(file, { defenseLevel: 'paranoid', outputFormat: 'image/webp' }),
+        () => sanitizeImage(file, { defenseLevel: 'paranoid' }),
         /WEBP_ENCODE_UNSUPPORTED/
       );
       assert.equal(terminated, 1);
@@ -1639,13 +1639,13 @@ test('AUD-06 (Report AUD-07) [NODE-VERIFIED]: sanitizeAlphaChannel enforces |del
 // and auditAfter derive from the exact final delivered bytes object.
 // =============================================================================
 
-test('AUD-16 [NODE-VERIFIED / MOCK-CONTRACT]: container-changing pipeline (PNG in -> WebP out + padding) derives sha256, sanitizedName, sanitizedSize, and auditAfter strictly from final delivered bytes', async () => {
+test('AUD-16 [NODE-VERIFIED / MOCK-CONTRACT]: container-changing pipeline (PNG in -> RFC 9649 WebP out) derives sha256, sanitizedName, sanitizedSize, and auditAfter strictly from final delivered bytes', async () => {
   const { processMediaFile } = await import('../src/core/pipeline');
   const { computeSha256 } = await import('../src/core/forensic/hash-naming');
 
   const mocks = installImagePipelineDomMocks({ width: 16, height: 16 });
   try {
-    // Minimal synthetic PNG input header -> pipeline re-synthesizes to WebP + Padme-H padding
+    // Minimal synthetic PNG input header -> pipeline re-synthesizes to unpadded RFC 9649 WebP
     const syntheticPng = new Uint8Array([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
       0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,

@@ -29,7 +29,10 @@ function createMetricViewModel(
   const safeLabel = sanitizeDisplayText(label);
   const beforeVal = sanitizeDisplayText(beforeRaw);
   const afterVal = sanitizeDisplayText(afterRaw);
-  const isAfterClean = afterVal === 'Clean' || afterVal === 'Applied';
+  const isAfterClean =
+    afterVal === 'Clean' ||
+    afterVal === 'Applied' ||
+    afterVal.startsWith('Clean (');
   return {
     label: safeLabel,
     beforeVal,
@@ -42,6 +45,35 @@ function createMetricViewModel(
 export function buildAuditModalViewModel(result: SanitizedResult): AuditModalViewModel {
   const before = result.auditBefore;
   const after = result.auditAfter;
+  const isVideo = result.format.toLowerCase().startsWith('video/');
+
+  let metrics: AuditMetricViewModel[];
+  if (isVideo) {
+    const unsafeBefore = before.markers.filter(m => !m.isSanitizedSafe).length;
+    const unsafeAfter = after.markers.filter(m => !m.isSanitizedSafe).length;
+    const removedAtoms = Math.max(0, unsafeBefore - unsafeAfter);
+    const atomsBeforeLabel = unsafeBefore > 0 ? `${unsafeBefore} detected` : 'Clean';
+    const atomsAfterLabel =
+      unsafeAfter === 0
+        ? `Clean (${removedAtoms} removed)`
+        : `${unsafeAfter} remaining (${removedAtoms} removed)`;
+
+    metrics = [
+      createMetricViewModel('Format / MIME', before.mimeType, after.mimeType),
+      createMetricViewModel('Sanitization Scope', 'N/A', 'Container Only (mdat untouched)'),
+      createMetricViewModel('Metadata Atoms', atomsBeforeLabel, atomsAfterLabel),
+      createMetricViewModel('Video Bitstream (mdat)', 'N/A', 'Untouched (Playable)'),
+    ];
+  } else {
+    metrics = [
+      createMetricViewModel('Format / MIME', before.mimeType, after.mimeType),
+      createMetricViewModel('EXIF / TIFF', before.hasExif ? 'Detected' : 'Clean', after.hasExif ? 'Detected' : 'Clean'),
+      createMetricViewModel('GPS Coordinates', before.hasGps ? 'Exposed' : 'Clean', after.hasGps ? 'Exposed' : 'Clean'),
+      createMetricViewModel('MakerNotes / OEM', before.hasMakerNotes ? 'Exposed' : 'Clean', after.hasMakerNotes ? 'Exposed' : 'Clean'),
+      createMetricViewModel('Thumbnail Leak', before.hasThumbnail ? 'Exposed' : 'Clean', after.hasThumbnail ? 'Exposed' : 'Clean'),
+      createMetricViewModel('Steganography Deep Decon', 'N/A', result.isDeepDecontaminated ? 'Applied' : 'Skipped'),
+    ];
+  }
 
   return {
     originalName: sanitizeDisplayText(result.originalName),
@@ -50,14 +82,7 @@ export function buildAuditModalViewModel(result: SanitizedResult): AuditModalVie
     sanitizedName: sanitizeDisplayText(result.sanitizedName),
     sanitizedSizeLabel: formatBytes(result.sanitizedSize),
     afterSha256: sanitizeDisplayText(after.sha256),
-    metrics: [
-      createMetricViewModel('Format / MIME', before.mimeType, after.mimeType),
-      createMetricViewModel('EXIF / TIFF', before.hasExif ? 'Detected' : 'Clean', after.hasExif ? 'Detected' : 'Clean'),
-      createMetricViewModel('GPS Coordinates', before.hasGps ? 'Exposed' : 'Clean', after.hasGps ? 'Exposed' : 'Clean'),
-      createMetricViewModel('MakerNotes / OEM', before.hasMakerNotes ? 'Exposed' : 'Clean', after.hasMakerNotes ? 'Exposed' : 'Clean'),
-      createMetricViewModel('Thumbnail Leak', before.hasThumbnail ? 'Exposed' : 'Clean', after.hasThumbnail ? 'Exposed' : 'Clean'),
-      createMetricViewModel('Steganography Deep Decon', 'N/A', result.isDeepDecontaminated ? 'Applied' : 'Skipped'),
-    ],
+    metrics,
   };
 }
 

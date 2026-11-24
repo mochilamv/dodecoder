@@ -66,12 +66,21 @@ export function buildQueueItemViewModel(item: QueueItem): QueueItemViewModel {
   const rawProgress = Number.isFinite(item.progress) ? Math.round(item.progress) : 0;
   const progressPercent = Math.max(0, Math.min(100, rawProgress));
 
+  const fileMime = (item.file?.type ?? '').toLowerCase();
+  const rawFileName = (item.file?.name ?? '').toLowerCase();
+  const isVideoContainer =
+    fileMime === 'video/mp4' ||
+    fileMime === 'video/quicktime' ||
+    /\.(mp4|mov)$/i.test(rawFileName);
+
   const processingLabel = isProcessing
     ? (item.status === 'analyzing'
         ? 'Scanning...'
-        : progressPercent >= 78 && progressPercent < 90
-          ? 'Synthesizing WebP...'
-          : 'Re-encoding...')
+        : isVideoContainer
+          ? 'Scrubbing container...'
+          : progressPercent >= 78 && progressPercent < 90
+            ? 'Synthesizing WebP...'
+            : 'Re-encoding...')
     : null;
 
   const sanitizedError = sanitizeDisplayText(item.error ?? '');
@@ -175,7 +184,8 @@ function createSvgIcon(name: QueueIconName): SVGElement {
 
 export function renderQueueList(
   items: QueueItem[],
-  callbacks: QueueListCallbacks
+  callbacks: QueueListCallbacks,
+  statusError?: string | null
 ): HTMLElement {
   const container = document.createElement('div');
   container.className = 'mt-6 space-y-4';
@@ -234,6 +244,16 @@ export function renderQueueList(
 
   actionsBar.appendChild(actionsGroup);
   container.appendChild(actionsBar);
+
+  const safeStatusError = sanitizeDisplayText(statusError ?? '').trim();
+  if (safeStatusError) {
+    const statusErrorEl = document.createElement('div');
+    statusErrorEl.id = 'queue-status-error';
+    statusErrorEl.setAttribute('role', 'alert');
+    statusErrorEl.className = 'text-xs font-mono text-[#FF4444] py-1';
+    statusErrorEl.textContent = safeStatusError;
+    container.appendChild(statusErrorEl);
+  }
 
   // Items List
   const itemsContainer = document.createElement('div');

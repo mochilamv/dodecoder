@@ -5,7 +5,7 @@ import { revokeUrls } from '../core/utils/memory';
 import { isAbortError } from '../core/image/bitmap-lifecycle';
 import { renderSettingsPanel } from './components/settings-panel';
 import { renderDropzone } from './components/dropzone';
-import { renderQueueList } from './components/queue-list';
+import { renderQueueList, sanitizeDisplayText } from './components/queue-list';
 import { renderAuditModal } from './components/audit-modal';
 import { renderLegalModal } from './components/legal-modal';
 
@@ -25,6 +25,7 @@ export class DoDecoderApp {
   private activeAbortController: AbortController | null = null;
   private activeObjectUrls = new Set<string>();
   private activeBitmaps = new Set<ImageBitmap>();
+  private queueStatusError: string | null = null;
   private readonly deps: Required<DoDecoderAppDeps>;
 
   constructor(root: HTMLElement, deps: DoDecoderAppDeps = {}) {
@@ -68,7 +69,7 @@ export class DoDecoderApp {
       onDownloadAllZip: () => this.handleDownloadAllZip(),
       onInspectForensics: item => this.handleInspectForensics(item),
       onClearQueue: () => this.handleClearQueue(),
-    });
+    }, this.queueStatusError);
     main.appendChild(queueList);
 
     const footer = this.createFooter();
@@ -108,6 +109,7 @@ export class DoDecoderApp {
       progress: 0,
     }));
 
+    this.queueStatusError = null;
     this.queue.push(...newItems);
     this.render();
     void this.processQueue();
@@ -135,7 +137,6 @@ export class DoDecoderApp {
           const result = await this.deps.processFile(
             item.file,
             {
-              quality: 0.60,
               signal: controller.signal,
             },
             pct => {
@@ -184,7 +185,7 @@ export class DoDecoderApp {
         onDownloadAllZip: () => this.handleDownloadAllZip(),
         onInspectForensics: item => this.handleInspectForensics(item),
         onClearQueue: () => this.handleClearQueue(),
-      });
+      }, this.queueStatusError);
       existingQueue.replaceWith(newQueue);
     } else {
       this.render();
@@ -216,9 +217,25 @@ export class DoDecoderApp {
       .map(q => q.result as SanitizedResult);
     if (completed.length === 0) return;
 
-    const { zipBlob, zipFileName } = await this.deps.createZipBundle(completed);
-    if (this.queueEpoch !== epoch) return;
-    this.triggerTrackedDownload(zipBlob, zipFileName);
+    if (this.queueStatusError !== null) {
+      this.queueStatusError = null;
+      this.updateQueueView();
+    }
+
+    try {
+      const { zipBlob, zipFileName } = await this.deps.createZipBundle(completed);
+      if (this.queueEpoch !== epoch) return;
+      this.triggerTrackedDownload(zipBlob, zipFileName);
+    } catch (err: unknown) {
+      if (this.queueEpoch !== epoch) return;
+      const rawMessage =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Failed to create ZIP archive';
+      const safeMessage = sanitizeDisplayText(rawMessage).trim() || 'Failed to create ZIP archive';
+      this.queueStatusError = `ZIP Export Error: ${safeMessage}`;
+      this.updateQueueView();
+    }
   }
 
   private handleInspectForensics(item: QueueItem): void {
@@ -252,6 +269,7 @@ export class DoDecoderApp {
     // Advance epoch first so any late progress, job resolution, or ZIP export is discarded
     this.queueEpoch++;
     this.processingEpoch = null;
+    this.queueStatusError = null;
 
     if (this.activeAbortController) {
       this.activeAbortController.abort('Queue cleared');

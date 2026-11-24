@@ -4,7 +4,7 @@
 
 export type DefenseLevel = 'standard' | 'hardened' | 'paranoid';
 
-export type OutputFormat = 'original' | 'image/webp' | 'image/jpeg' | 'image/png';
+export const MAX_MEDIA_FILE_BYTES = 256 * 1024 * 1024; // 256 MiB (268,435,456 bytes)
 
 export interface MetadataTag {
   category: 'EXIF' | 'GPS' | 'MakerNotes' | 'IFD1_Thumbnail' | 'XMP' | 'Container' | 'ICC';
@@ -39,7 +39,6 @@ export interface ForensicReport {
 
 export interface SanitizedResult {
   blob: Blob;
-  originalBlob?: Blob;
   originalName: string;
   sanitizedName: string;
   originalSize: number;

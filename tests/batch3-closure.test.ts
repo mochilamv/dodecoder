@@ -513,11 +513,11 @@ test('IMAGE_PARSER_AND_CLEANUP [NODE-VERIFIED / MOCK-CONTRACT]: pre-decode image
       (err: unknown) => err instanceof ImageDecompressionGuardError
     );
     await assert.rejects(
-      () => sanitizeImage(new File([bombPng], 'bomb.png', { type: 'image/png' }), { defenseLevel: 'paranoid', outputFormat: 'image/webp' }),
+      () => sanitizeImage(new File([bombPng], 'bomb.png', { type: 'image/png' }), { defenseLevel: 'paranoid' }),
       (err: unknown) => err instanceof ImageDecompressionGuardError
     );
     await assert.rejects(
-      () => sanitizeImage(new File([new Uint8Array([0x01, 0x02, 0x03, 0x04])], 'malformed.jpg', { type: 'image/jpeg' }), { defenseLevel: 'paranoid', outputFormat: 'image/webp' }),
+      () => sanitizeImage(new File([new Uint8Array([0x01, 0x02, 0x03, 0x04])], 'malformed.jpg', { type: 'image/jpeg' }), { defenseLevel: 'paranoid' }),
       (err: unknown) => err instanceof ImageDecompressionGuardError
     );
     assert.equal(decodeCalls, 0, 'createImageBitmap must NEVER be invoked on bombs or malformed headers');

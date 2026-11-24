@@ -188,7 +188,7 @@ test('6. Display Calibration and ICC Profile Stripping (iCCP, cHRM, gAMA, APP2, 
   ]);
 
   const cleanPng = stripDisplayColorProfiles(syntheticPng, 'image/png');
-  const cleanMarkers = inspectBinaryMarkers(cleanPng.buffer);
+  const cleanMarkers = inspectBinaryMarkers(cleanPng.slice().buffer);
 
   assert.equal(cleanMarkers.some(m => m.marker === 'iCCP'), false, 'iCCP chunk must be stripped');
   assert.equal(cleanMarkers.some(m => m.marker === 'cHRM'), false, 'cHRM chunk must be stripped');
@@ -213,12 +213,12 @@ test('6. Display Calibration and ICC Profile Stripping (iCCP, cHRM, gAMA, APP2, 
   ]);
 
   const cleanJpeg = stripDisplayColorProfiles(syntheticJpeg, 'image/jpeg');
-  const jpegMarkers = inspectBinaryMarkers(cleanJpeg.buffer);
+  const jpegMarkers = inspectBinaryMarkers(cleanJpeg.slice().buffer);
   assert.equal(jpegMarkers.some(m => m.marker === '0xFFE2'), false, 'APP2 ICC_PROFILE marker must be stripped');
   assert.ok(jpegMarkers.some(m => m.marker === '0xFFD8'), 'SOI preserved');
   assert.ok(jpegMarkers.some(m => m.marker === '0xFFD9'), 'EOI preserved');
 
-  // 3. Synthetic WebP with VP8X and ICCP chunk
+  // 3. Synthetic WebP with VP8X and ICCP chunk (no ALPH/ANIM -> collapses to Simple VP8)
   const syntheticWebp = new Uint8Array([
     0x52, 0x49, 0x46, 0x46, // RIFF
     0x2c, 0x00, 0x00, 0x00, // Size: 44
@@ -238,10 +238,11 @@ test('6. Display Calibration and ICC Profile Stripping (iCCP, cHRM, gAMA, APP2, 
   ]);
 
   const cleanWebp = stripDisplayColorProfiles(syntheticWebp, 'image/webp');
-  const webpMarkers = inspectBinaryMarkers(cleanWebp.buffer);
+  const webpMarkers = inspectBinaryMarkers(cleanWebp.slice().buffer);
   assert.equal(webpMarkers.some(m => m.marker === 'ICCP'), false, 'WebP ICCP chunk must be stripped');
-  // Check VP8X flag bit 5 was cleared
-  assert.equal(cleanWebp[20] & 0x20, 0, 'VP8X ICC flag bit must be cleared');
+  assert.equal(webpMarkers.some(m => m.marker === 'VP8X'), false, 'Simple WebP without ALPH/ANIM must omit VP8X header');
+  assert.deepEqual(webpMarkers.map(m => m.marker), ['VP8'], 'Only VP8 chunk must remain');
+  assert.equal(cleanWebp.byteLength, 22, 'Simple WebP size must be 12 RIFF + 8 VP8 header + 2 payload bytes');
 });
 
 test('7. WebP ALPH (Alpha transparency) chunk recognized as legitimate and safe', () => {
@@ -307,7 +308,8 @@ test('9. Bypass Alias Elimination: stripAllMetadataSurgical permanently removed'
 });
 
 test('10. 128-bit SHA-256 Naming and Chained Extension Sanitization', async () => {
-  const { sanitizeExtension, generateSanitizedName, generateDeterministicHashName, generateEphemeralSaltedName } = await import('../src/core/forensic/hash-naming');
+  const hashNaming = await import('../src/core/forensic/hash-naming');
+  const { sanitizeExtension, generateSanitizedName, generateDeterministicHashName } = hashNaming;
 
   // Extension sanitization eliminates chained extensions
   assert.equal(sanitizeExtension('.jpg.webp'), 'webp');
@@ -324,9 +326,8 @@ test('10. 128-bit SHA-256 Naming and Chained Extension Sanitization', async () =
   assert.equal(sanitizedHash.length, 32, 'Default hash length must be 32 hex chars (128 bits)');
   assert.equal(sanitizedExt, 'webp', 'Chained extension must be reduced to final webp extension');
 
-  // Compatibility alias also yields 32 hex chars
-  const saltedAliasName = await generateEphemeralSaltedName(samplePayload, '.jpg.webp');
-  assert.equal(saltedAliasName, defaultSanitizedName);
+  // Legacy misleading generateEphemeralSaltedName alias must be removed
+  assert.equal('generateEphemeralSaltedName' in hashNaming, false, 'generateEphemeralSaltedName must be removed');
 
   // Deterministic 128-bit naming
   const detName = await generateDeterministicHashName(samplePayload, '.png.webp');
@@ -440,18 +441,8 @@ test('12. Deep Decontamination Pipeline: Resampling, Median Filter, and Visibili
   assert.equal(destBuffer.length, 16, 'Resampled buffer must match target raster dimension');
 });
 
-test('13. Enforced Unified Lossy VP8 Pipeline, Bypass Suppression, and Image Guard Validation', async () => {
-  // Verify that all images route strictly to lossy VP8 with quality strictly 0.60
-  const effectiveMime = 'image/webp';
-  const effectiveQuality = 0.60;
-  assert.equal(effectiveMime, 'image/webp', 'Unified pipeline must enforce image/webp container');
-  assert.equal(effectiveQuality, 0.60, 'Unified pipeline must hardcode lossy VP8 quality to 0.60');
-
-  // Verify that bypass is completely disabled
-  const shouldBypass = false;
-  assert.equal(shouldBypass, false, '1:1 bypass must be completely disabled for all image assets');
-
-  // Verify isImageMimeType guard correctly classifies all image types
+test('13. Media Pipeline Image Guard Classification', async () => {
+  // Verify isImageMimeType guard correctly classifies all image types vs supported video types
   const { isImageMimeType } = await import('../src/core/media/media-sanitizer');
 
   const imageInputs: Array<[string, string]> = [
@@ -628,11 +619,6 @@ test('19. Cryptographic Noise Injection Divergence', async () => {
   assert.ok(diverges, 'Cryptographic Poisson-Gaussian noise must diverge across identical inputs');
 });
 
-test('20. Spatial Grid Tiling Dimensions', async () => {
-  const { sanitizeImage } = await import('../src/core/image/image-sanitizer');
-  assert.equal(typeof sanitizeImage, 'function');
-});
-
 test('22. Pure TypeScript Zero-WASM Architecture Invariant (AUD-23)', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
@@ -704,5 +690,6 @@ test('29. median9 selection network equals full-sort median', async () => {
 import './batch2-image-pipeline.test';
 import './batch1-security-reliability.test';
 import './batch3-closure.test';
+import './v2-release-remediation.test';
 
 

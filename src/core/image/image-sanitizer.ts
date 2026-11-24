@@ -1,4 +1,4 @@
-import { DefenseLevel, OutputFormat, SanitizedResult } from '../types';
+import { DefenseLevel, SanitizedResult } from '../types';
 import { analyzeForensics } from '../forensic/exif-inspector';
 import { finalizeSanitizedOutput } from '../forensic/finalize-output';
 import { applyPrnuDefense } from './prnu-defense';
@@ -12,8 +12,6 @@ export { withManagedImageBitmap } from './bitmap-lifecycle';
 
 export interface ImageSanitizerOptions {
   defenseLevel: DefenseLevel;
-  outputFormat: OutputFormat;
-  quality?: number;
   signal?: AbortSignal;
 }
 
@@ -158,7 +156,7 @@ export async function sanitizeImage(
     tilesProcessed = 1;
 
     const prnuLevel = options.defenseLevel === 'standard' ? 'hardened' : options.defenseLevel;
-    applyPrnuDefense(workCanvas, workCanvas, prnuLevel, needsAlpha, false);
+    applyPrnuDefense(workCanvas, workCanvas, prnuLevel, needsAlpha);
     onProgress?.(55);
 
     applyDeepDecontamination(workCanvas, needsAlpha);
@@ -196,8 +194,15 @@ export async function sanitizeImage(
     }
   }
 
-  onProgress?.(92);
-  const finalized = await finalizeSanitizedOutput(cleanBytes, effectiveMime);
+  let finalized;
+  try {
+    onProgress?.(92);
+    finalized = await finalizeSanitizedOutput(cleanBytes, effectiveMime);
+  } finally {
+    if (cleanBytes) {
+      cleanBytes.fill(0);
+    }
+  }
 
   if (finalized.sha256 === auditBefore.sha256) {
     throw new Error('Mandatory re-synthesis invariant violated: output SHA-256 must diverge from input');
@@ -206,7 +211,6 @@ export async function sanitizeImage(
   onProgress?.(100);
   return {
     blob: finalized.blob,
-    originalBlob: file,
     originalName,
     sanitizedName: finalized.sanitizedName,
     originalSize,

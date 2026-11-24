@@ -710,52 +710,6 @@ function applyBicubicMicroAffine(
   }
 }
 
-function injectStochasticCamouflageNoise(
-  data: Uint8ClampedArray | Uint8Array,
-  width: number,
-  height: number,
-  noiseIntensity: number,
-  hasAlpha: boolean
-): void {
-  if (noiseIntensity <= 0.0) return;
-
-  const rngChunk = new Uint32Array(new ArrayBuffer(1024 * 4), 0, 1024);
-  const clampedIntensity = noiseIntensity > 2.2 ? 2.2 : noiseIntensity;
-  const invMaxUint32 = 1.0 / 4294967295.0;
-
-  try {
-    const totalPixels = width * height;
-    let rngCursor = rngChunk.length;
-
-    for (let p = 0; p < totalPixels; p++) {
-      if (rngCursor + 2 >= rngChunk.length) {
-        fillSecureRandomUint32(rngChunk);
-        rngCursor = 0;
-      }
-
-      const u1 = rngChunk[rngCursor++] * invMaxUint32;
-      const u2 = rngChunk[rngCursor++] * invMaxUint32;
-      const delta = (u1 - u2) * clampedIntensity;
-
-      const idx = p << 2;
-      if (hasAlpha && data[idx + 3] === 0) {
-        data[idx] = 0;
-        data[idx + 1] = 0;
-        data[idx + 2] = 0;
-        continue;
-      }
-      data[idx] = clamp8((data[idx] + delta + 0.5) | 0);
-      data[idx + 1] = clamp8((data[idx + 1] + delta + 0.5) | 0);
-      data[idx + 2] = clamp8((data[idx + 2] + delta + 0.5) | 0);
-      if (!hasAlpha) {
-        data[idx + 3] = 255;
-      }
-    }
-  } finally {
-    rngChunk.fill(0);
-  }
-}
-
 export function calculateAntiPrnuConfig(
   level: DefenseLevel,
   skipNoise = false
@@ -1147,8 +1101,7 @@ export function applyPrnuDefense(
   sourceImage: ImageBitmap | HTMLCanvasElement | OffscreenCanvas,
   targetCanvas: HTMLCanvasElement | OffscreenCanvas,
   level: DefenseLevel,
-  hasAlpha = true,
-  skipNoise = false
+  hasAlpha = true
 ): void {
   const width = sourceImage.width;
   const height = sourceImage.height;
@@ -1202,7 +1155,7 @@ export function applyPrnuDefense(
       }
     }
 
-    const config = calculateAntiPrnuConfig(level, skipNoise);
+    const config = calculateAntiPrnuConfig(level, true);
 
     // Run wavelet PRNU attenuation before geometric resampling so the MAD
     // noise estimator operates on unblurred high-frequency sensor energy.
@@ -1228,15 +1181,9 @@ export function applyPrnuDefense(
       hasAlpha
     );
 
-    if (!skipNoise && config.noiseIntensity > 0) {
-      injectStochasticCamouflageNoise(
-        pixels,
-        width,
-        height,
-        config.noiseIntensity,
-        hasAlpha
-      );
-    } else if (!hasAlpha) {
+    // Skip redundant pre-median monochromatic noise here; post-median CSPRNG
+    // visibility dithering and heteroscedastic CMOS noise run downstream.
+    if (!hasAlpha) {
       const totalBytes = width * height * 4;
       for (let i = 3; i < totalBytes; i += 4) {
         pixels[i] = 255;

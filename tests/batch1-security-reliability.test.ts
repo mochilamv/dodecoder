@@ -440,13 +440,16 @@ test('AUD-17 (Report AUD-21) [MOCK-CONTRACT]: audit-modal renders adversarial pa
 });
 
 test('AUD-17 (Report AUD-21) [NODE-VERIFIED]: index.html and dist/index.html enforce hardened meta CSP without WASM or unsafe directives', () => {
-  const htmlPaths = [
-    path.join(REPO_ROOT, 'index.html'),
-    path.join(REPO_ROOT, 'dist', 'index.html'),
-  ];
+  const indexHtmlPath = path.join(REPO_ROOT, 'index.html');
+  assert.ok(fs.existsSync(indexHtmlPath), `Expected HTML file at ${indexHtmlPath}`);
+
+  const htmlPaths = [indexHtmlPath];
+  const distHtmlPath = path.join(REPO_ROOT, 'dist', 'index.html');
+  if (fs.existsSync(distHtmlPath)) {
+    htmlPaths.push(distHtmlPath);
+  }
 
   for (const htmlPath of htmlPaths) {
-    assert.ok(fs.existsSync(htmlPath), `Expected HTML file at ${htmlPath}`);
     const html = fs.readFileSync(htmlPath, 'utf8');
     const csp = parseMetaCsp(html);
 

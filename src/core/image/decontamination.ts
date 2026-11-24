@@ -4,7 +4,7 @@
  * Disrupts sub-perceptual spatial watermarks, UID markers, and carrier signals:
  * 1. Spatial Micro-Resampling: 99.5% downscale and 100% Catmull-Rom bicubic reconstruction.
  * 2. Hardware-Accelerated 3x3 Median Filter: WebGL fragment shader with deterministic CPU fallback.
- * 3. Visibility-Threshold Dithering: Deterministic discrete level modulation across RGB channels.
+ * 3. Visibility-Threshold Dithering: CSPRNG discrete level modulation across RGB channels.
  */
 
 function cubicWeight(x: number): number {
@@ -367,7 +367,6 @@ export function applyMedianFilter3x3(
   let program: WebGLProgram | null = null;
   let posBuffer: WebGLBuffer | null = null;
   let texture: WebGLTexture | null = null;
-  const framebuffer: WebGLFramebuffer | null = null;
 
   try {
     try {
@@ -515,7 +514,7 @@ export function applyMedianFilter3x3(
       gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas as any);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, w, h);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
@@ -536,7 +535,6 @@ export function applyMedianFilter3x3(
         gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         gl.useProgram(null);
         if (texture) gl.deleteTexture(texture);
-        if (framebuffer) gl.deleteFramebuffer(framebuffer);
         if (posBuffer) gl.deleteBuffer(posBuffer);
         if (program) {
           if (vs) gl.detachShader(program, vs);

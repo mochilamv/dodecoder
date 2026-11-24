@@ -1,4 +1,4 @@
-import { DefenseLevel, OutputFormat, SanitizedResult } from './types';
+import { DefenseLevel, SanitizedResult } from './types';
 import { sanitizeImage } from './image/image-sanitizer';
 import {
   sanitizeMedia,
@@ -12,8 +12,6 @@ export { finalizeSanitizedOutput } from './forensic/finalize-output';
 
 export interface PipelineOptions {
   defenseLevel?: DefenseLevel;
-  outputFormat?: OutputFormat;
-  quality?: number;
   signal?: AbortSignal;
 }
 
@@ -31,7 +29,6 @@ export async function processMediaFile(
   const name = file.name.toLowerCase();
 
   const defenseLevel: DefenseLevel = options.defenseLevel || 'paranoid';
-  const quality = options.quality ?? 0.85;
 
   const isImage = mime.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp|gif|tiff)$/i.test(name);
   if (isStandaloneAudioFormat(mime, name)) {
@@ -65,12 +62,8 @@ export async function processMediaFile(
   }
 
   if (isImage) {
-    const isLossless = mime === 'image/png' || name.endsWith('.png');
-    const outputFormat = isLossless ? 'image/png' : 'image/webp';
     const sanitized = await sanitizeImage(file, {
       defenseLevel,
-      outputFormat,
-      quality: isLossless ? undefined : quality,
       signal: options.signal,
     }, onProgress);
     if (options.signal?.aborted) {

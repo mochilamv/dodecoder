@@ -1,11 +1,28 @@
-import { DefenseLevel, SanitizedResult } from '../types';
+import { DefenseLevel, MAX_MEDIA_FILE_BYTES, SanitizedResult } from '../types';
 import { analyzeForensics } from '../forensic/exif-inspector';
 import { finalizeSanitizedOutput } from '../forensic/finalize-output';
 import { createAbortError, isAbortError } from '../image/bitmap-lifecycle';
 
+export { MAX_MEDIA_FILE_BYTES } from '../types';
+
 export interface MediaSanitizerOptions {
   defenseLevel: DefenseLevel;
   signal?: AbortSignal;
+}
+
+export class MediaFileSizeLimitError extends RangeError {
+  public readonly code = 'MEDIA_FILE_SIZE_LIMIT_EXCEEDED' as const;
+  public readonly actualBytes: number;
+  public readonly maxBytes: number;
+
+  constructor(actualBytes: number, maxBytes: number = MAX_MEDIA_FILE_BYTES) {
+    super(
+      `MP4/MOV file size (${actualBytes} bytes) exceeds in-memory limit of ${maxBytes} bytes (256 MiB).`
+    );
+    this.name = 'MediaFileSizeLimitError';
+    this.actualBytes = actualBytes;
+    this.maxBytes = maxBytes;
+  }
 }
 
 export type UnsupportedMediaCode =
@@ -57,6 +74,7 @@ export function isMkvOrWebm(mimeType: string, name: string, headerBytes?: Uint8A
 
 export const FOURCC_FTYP = 0x66747970;
 export const FOURCC_MOOV = 0x6d6f6f76;
+export const FOURCC_MOOF = 0x6d6f6f66;
 export const FOURCC_MVHD = 0x6d766864;
 export const FOURCC_TKHD = 0x746b6864;
 export const FOURCC_MDHD = 0x6d646864;
@@ -71,8 +89,9 @@ export const FOURCC_MDAT = 0x6d646174;
 export const FOURCC_FREE = 0x66726565;
 export const FOURCC_SKIP = 0x736b6970;
 
-// Sub-boxes for tracking hdlr
+// Sub-boxes for tracking hdlr and fragmented MP4 containers
 export const FOURCC_TRAK = 0x7472616b;
+export const FOURCC_TRAF = 0x74726166;
 export const FOURCC_MDIA = 0x6d646961;
 export const FOURCC_MINF = 0x6d696e66;
 export const FOURCC_STBL = 0x7374626c;
@@ -197,7 +216,9 @@ function sanitizeBoxListInPlace(
 
     const isContainer =
       boxType === FOURCC_MOOV ||
+      boxType === FOURCC_MOOF ||
       boxType === FOURCC_TRAK ||
+      boxType === FOURCC_TRAF ||
       boxType === FOURCC_MDIA ||
       boxType === FOURCC_MINF ||
       boxType === FOURCC_STBL ||
@@ -293,6 +314,9 @@ export async function sanitizeMediaWithWorker(
       'AUDIO_UNSUPPORTED',
       `Standalone audio format rejected: MIME="${mimeType}" name="${originalName}". Only images and MP4/MOV video containers are supported.`
     );
+  }
+  if (buffer.byteLength > MAX_MEDIA_FILE_BYTES) {
+    throw new MediaFileSizeLimitError(buffer.byteLength, MAX_MEDIA_FILE_BYTES);
   }
 
   const headerView = new Uint8Array(buffer, 0, Math.min(16, buffer.byteLength));
@@ -400,6 +424,16 @@ export async function sanitizeMedia(
     );
   }
 
+  if (isMkvOrWebm(fileMime, fileName)) {
+    throw new UnsupportedMediaFormatError(
+      'CONTAINER_UNSUPPORTED',
+      'MKV/WebM container rejected: MIME="' + fileMime + '" name="' + fileName + '". Only MP4 and MOV container metadata sanitization is supported.'
+    );
+  }
+  if (file.size > MAX_MEDIA_FILE_BYTES) {
+    throw new MediaFileSizeLimitError(file.size, MAX_MEDIA_FILE_BYTES);
+  }
+
   const headerBytes = new Uint8Array(await file.slice(0, 16).arrayBuffer());
   if (isMkvOrWebm(fileMime, fileName, headerBytes)) {
     throw new UnsupportedMediaFormatError(
@@ -440,7 +474,6 @@ export async function sanitizeMedia(
 
     return {
       blob: finalized.blob,
-      originalBlob: file,
       originalName,
       sanitizedName: finalized.sanitizedName,
       originalSize: file.size,

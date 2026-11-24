@@ -1,4 +1,4 @@
-import { ForensicReport, MarkerInfo, MetadataTag } from '../types';
+import { ForensicReport, MarkerInfo, MAX_MEDIA_FILE_BYTES, MetadataTag } from '../types';
 import { inspectBinaryMarkers } from './marker-parser';
 import { computeSha256 } from './hash-naming';
 
@@ -20,6 +20,7 @@ export type ExifParseFailureCode =
   | 'MAX_IFD_ENTRIES_EXCEEDED'
   | 'ENTRY_OUT_OF_BOUNDS'
   | 'VALUE_OVERFLOW_OR_OOB'
+  | 'FILE_TOO_LARGE'
   | 'READ_ERROR';
 
 export interface ExifParseFailure {
@@ -134,6 +135,36 @@ export async function analyzeForensics(
   const fileName = customName || (typeof File !== 'undefined' && file instanceof File ? file.name : 'unnamed_media');
   const fileSize = typeof file?.size === 'number' && Number.isFinite(file.size) ? file.size : 0;
   const mimeType = (typeof file?.type === 'string' && file.type) ? file.type : 'application/octet-stream';
+
+  const normalizedMime = mimeType.toLowerCase();
+  const isMp4OrMovInput =
+    normalizedMime === 'video/mp4' ||
+    normalizedMime === 'video/quicktime' ||
+    /\.(mp4|mov)$/i.test(fileName);
+
+  if (isMp4OrMovInput && fileSize > MAX_MEDIA_FILE_BYTES) {
+    const message = `MP4/MOV file size (${fileSize} bytes) exceeds in-memory inspection limit of ${MAX_MEDIA_FILE_BYTES} bytes (256 MiB)`;
+    const failure = makeFailure('FILE_TOO_LARGE', message);
+    return {
+      fileName,
+      fileSize,
+      mimeType,
+      hasExif: false,
+      hasGps: false,
+      hasThumbnail: false,
+      hasMakerNotes: false,
+      tags: [{
+        category: 'Container',
+        name: 'Media File Size Limit Exceeded',
+        value: message,
+        severity: 'medium',
+      }],
+      markers: [],
+      prnuSusceptibility: 'low',
+      sha256: '',
+      exifParseResult: failure,
+    };
+  }
 
   let buffer: ArrayBuffer;
   try {

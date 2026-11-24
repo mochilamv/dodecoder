@@ -74,7 +74,7 @@ export async function processImageWorkerJob(
 
   const { width, height, canvas: workCanvas, ctx: workCtx } = decoded;
   const prnuLevel = options.defenseLevel === 'standard' ? 'hardened' : options.defenseLevel;
-  applyPrnuDefense(workCanvas, workCanvas, prnuLevel, needsAlpha, false);
+  applyPrnuDefense(workCanvas, workCanvas, prnuLevel, needsAlpha);
   onProgress?.(55);
 
   applyDeepDecontamination(workCanvas, needsAlpha);

@@ -1,7 +1,6 @@
 /**
- * Cryptographic Hashing and Ephemeral Salting
+ * Cryptographic SHA-256 Hashing and Sanitized File Naming
  * Eliminates temporal, camera sequential, and OS filesystem attribution.
- * Implements CSPRNG Ephemeral Salting to prevent cross-device database correlation.
  */
 
 /**
@@ -43,7 +42,6 @@ export async function generateSanitizedName(
 }
 
 export const generateDeterministicHashName = generateSanitizedName;
-export const generateEphemeralSaltedName = generateSanitizedName;
 
 /**
  * Generates a CSPRNG-randomized filename using window.crypto.getRandomValues

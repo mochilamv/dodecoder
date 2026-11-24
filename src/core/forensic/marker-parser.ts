@@ -469,7 +469,9 @@ function inspectWebPChunks(_bytes: Uint8Array, view: DataView): MarkerInfo[] {
 }
 
 const FOURCC_MOOV = 0x6d6f6f76;
+const FOURCC_MOOF = 0x6d6f6f66;
 const FOURCC_TRAK = 0x7472616b;
+const FOURCC_TRAF = 0x74726166;
 const FOURCC_MDIA = 0x6d646961;
 const MP4_MAX_INSPECT_DEPTH = 8;
 
@@ -551,11 +553,17 @@ function inspectMp4BoxRange(
       case FOURCC_MOOV:
         boxName = 'moov';
         break;
+      case FOURCC_MOOF:
+        boxName = 'moof';
+        break;
       case 0x6d646174:
         boxName = 'mdat';
         break;
       case FOURCC_TRAK:
         boxName = 'trak';
+        break;
+      case FOURCC_TRAF:
+        boxName = 'traf';
         break;
       case FOURCC_MDIA:
         boxName = 'mdia';
@@ -574,7 +582,13 @@ function inspectMp4BoxRange(
     });
 
     if (
-      (boxTypeInt === FOURCC_MOOV || boxTypeInt === FOURCC_TRAK || boxTypeInt === FOURCC_MDIA) &&
+      (
+        boxTypeInt === FOURCC_MOOV ||
+        boxTypeInt === FOURCC_MOOF ||
+        boxTypeInt === FOURCC_TRAK ||
+        boxTypeInt === FOURCC_TRAF ||
+        boxTypeInt === FOURCC_MDIA
+      ) &&
       offset + headerSize < offset + actualSize
     ) {
       inspectMp4BoxRange(view, offset + headerSize, offset + actualSize, depth + 1, markers);

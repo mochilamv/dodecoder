@@ -28,11 +28,11 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - name: Run Forensic Verification Tests
-        run: npm test
-
       - name: Build Static Distribution
         run: npm run build
+
+      - name: Run Forensic Verification Tests
+        run: npm test
 
       - name: Deploy to gh-pages Branch
         uses: peaceiris/actions-gh-pages@v4

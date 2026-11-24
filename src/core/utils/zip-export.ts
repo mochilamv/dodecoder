@@ -1,5 +1,5 @@
 import { SanitizedResult } from '../types';
-import { generateEphemeralSaltedName } from '../forensic/hash-naming';
+import { generateSanitizedName } from '../forensic/hash-naming';
 import { wipeBuffer } from './memory';
 
 // Real fixed header sizes emitted by this non-ZIP64 STORED serializer
@@ -241,145 +241,138 @@ export async function createSanitizedZipBundle(
     }))
   );
 
-  // Pass 1: Prepare data and calculate sizes
-  const files: {
+  // Constants for anti-forensic ZIP
+  const DOS_TIME = 0x0000;
+  const DOS_DATE = 0x0021; // Jan 1, 1980
+  const VERSION_NEEDED = 20; // 2.0
+  const VERSION_MADE_BY = 0x0014; // MS-DOS/FAT
+  const COMPRESSION_STORED = 0;
+
+  const entries: {
     nameBytes: Uint8Array;
-    data: Uint8Array;
     crc: number;
     size: number;
     offset: number;
   }[] = [];
-
-  let outBuffer: ArrayBuffer | null = null;
+  const tempBuffers: Uint8Array[] = [];
+  const parts: BlobPart[] = [];
 
   try {
     let currentOffset = 0;
-    let cdSize = 0;
 
+    // Pass 1: Stream each entry individually to compute CRC-32, emit its LFH, and
+    // compose the ZIP via Blob parts without duplicating a second contiguous ArrayBuffer.
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      const arrayBuffer = await item.blob.arrayBuffer();
-      const data = new Uint8Array(arrayBuffer);
       const nameBytes = encodedNames[i];
-      const crc = crc32(data);
-      const size = data.length;
+      let data: Uint8Array | null = null;
+      let crc = 0;
+      let size = 0;
 
-      files.push({
+      try {
+        const arrayBuffer = await item.blob.arrayBuffer();
+        data = new Uint8Array(arrayBuffer);
+        crc = crc32(data);
+        size = data.length;
+      } finally {
+        if (data) {
+          wipeBuffer(data);
+        }
+      }
+
+      const lfhBytes = new Uint8Array(ZIP_LOCAL_HEADER_SIZE + nameBytes.length);
+      tempBuffers.push(lfhBytes);
+      const lfhView = new DataView(lfhBytes.buffer, lfhBytes.byteOffset, lfhBytes.byteLength);
+
+      let lfhPos = 0;
+      lfhView.setUint32(lfhPos, 0x04034b50, true); lfhPos += 4; // LFH signature
+      lfhView.setUint16(lfhPos, VERSION_NEEDED, true); lfhPos += 2; // version needed
+      lfhView.setUint16(lfhPos, 0x0000, true); lfhPos += 2; // flags
+      lfhView.setUint16(lfhPos, COMPRESSION_STORED, true); lfhPos += 2; // compression
+      lfhView.setUint16(lfhPos, DOS_TIME, true); lfhPos += 2; // dos time
+      lfhView.setUint16(lfhPos, DOS_DATE, true); lfhPos += 2; // dos date
+      lfhView.setUint32(lfhPos, crc, true); lfhPos += 4; // crc
+      lfhView.setUint32(lfhPos, size, true); lfhPos += 4; // compressed size
+      lfhView.setUint32(lfhPos, size, true); lfhPos += 4; // uncompressed size
+      lfhView.setUint16(lfhPos, nameBytes.length, true); lfhPos += 2; // file name length
+      lfhView.setUint16(lfhPos, 0, true); lfhPos += 2; // extra field length
+      lfhBytes.set(nameBytes, lfhPos);
+
+      entries.push({
         nameBytes,
-        data,
         crc,
         size,
         offset: currentOffset,
       });
 
-      const lfhSize = ZIP_LOCAL_HEADER_SIZE + nameBytes.length + size;
-      currentOffset += lfhSize;
-      cdSize += ZIP_CENTRAL_HEADER_SIZE + nameBytes.length;
+      parts.push(lfhBytes, item.blob);
+      currentOffset += ZIP_LOCAL_HEADER_SIZE + nameBytes.length + size;
 
-      onProgress?.(Math.round(((i + 1) / items.length) * 40));
+      onProgress?.(Math.round(((i + 1) / items.length) * 80));
     }
 
-    // Re-validate actual read byte lengths before contiguous allocation
+    // Re-validate actual read byte lengths before writing central directory and EOCD
     const summary = assertZipFits(
-      files.map(f => ({
-        nameByteLength: f.nameBytes.length,
-        byteLength: f.size,
+      entries.map(e => ({
+        nameByteLength: e.nameBytes.length,
+        byteLength: e.size,
       }))
     );
 
-    const totalSize = summary.totalArchiveSize;
-    outBuffer = new ArrayBuffer(totalSize);
-    const outView = new DataView(outBuffer);
-    const outU8 = new Uint8Array(outBuffer);
+    // Pass 2: Write Central Directory and End of Central Directory into a single compact buffer
+    const cdAndEocd = new Uint8Array(summary.centralDirectorySize + ZIP_EOCD_SIZE);
+    tempBuffers.push(cdAndEocd);
+    const cdView = new DataView(cdAndEocd.buffer, cdAndEocd.byteOffset, cdAndEocd.byteLength);
 
     let pos = 0;
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i];
 
-    // Constants for anti-forensic ZIP
-    const DOS_TIME = 0x0000;
-    const DOS_DATE = 0x0021; // Jan 1, 1980
-    const VERSION_NEEDED = 20; // 2.0
-    const VERSION_MADE_BY = 0x0014; // MS-DOS/FAT
-    const COMPRESSION_STORED = 0;
-
-    // Pass 2: Write Local File Headers and Data
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-
-      // LFH Signature
-      outView.setUint32(pos, 0x04034b50, true); pos += 4;
-      outView.setUint16(pos, VERSION_NEEDED, true); pos += 2; // version needed
-      outView.setUint16(pos, 0x0000, true); pos += 2; // flags
-      outView.setUint16(pos, COMPRESSION_STORED, true); pos += 2; // compression
-      outView.setUint16(pos, DOS_TIME, true); pos += 2; // dos time
-      outView.setUint16(pos, DOS_DATE, true); pos += 2; // dos date
-      outView.setUint32(pos, file.crc, true); pos += 4; // crc
-      outView.setUint32(pos, file.size, true); pos += 4; // compressed size
-      outView.setUint32(pos, file.size, true); pos += 4; // uncompressed size
-      outView.setUint16(pos, file.nameBytes.length, true); pos += 2; // file name length
-      outView.setUint16(pos, 0, true); pos += 2; // extra field length
-
-      // File name
-      outU8.set(file.nameBytes, pos); pos += file.nameBytes.length;
-      // File data
-      outU8.set(file.data, pos); pos += file.size;
-
-      onProgress?.(40 + Math.round(((i + 1) / files.length) * 40));
+      cdView.setUint32(pos, 0x02014b50, true); pos += 4; // CD signature
+      cdView.setUint16(pos, VERSION_MADE_BY, true); pos += 2; // version made by
+      cdView.setUint16(pos, VERSION_NEEDED, true); pos += 2; // version needed
+      cdView.setUint16(pos, 0x0000, true); pos += 2; // flags
+      cdView.setUint16(pos, COMPRESSION_STORED, true); pos += 2; // compression
+      cdView.setUint16(pos, DOS_TIME, true); pos += 2; // dos time
+      cdView.setUint16(pos, DOS_DATE, true); pos += 2; // dos date
+      cdView.setUint32(pos, entry.crc, true); pos += 4; // crc
+      cdView.setUint32(pos, entry.size, true); pos += 4; // compressed size
+      cdView.setUint32(pos, entry.size, true); pos += 4; // uncompressed size
+      cdView.setUint16(pos, entry.nameBytes.length, true); pos += 2; // file name length
+      cdView.setUint16(pos, 0, true); pos += 2; // extra field length
+      cdView.setUint16(pos, 0, true); pos += 2; // file comment length
+      cdView.setUint16(pos, 0, true); pos += 2; // disk number start
+      cdView.setUint16(pos, 0, true); pos += 2; // internal attributes
+      cdView.setUint32(pos, 0x00000020, true); pos += 4; // external attributes (Archive)
+      cdView.setUint32(pos, entry.offset, true); pos += 4; // relative offset of LFH
+      cdAndEocd.set(entry.nameBytes, pos); pos += entry.nameBytes.length;
     }
 
-    const cdOffset = pos;
+    // End of Central Directory
+    cdView.setUint32(pos, 0x06054b50, true); pos += 4; // EOCD signature
+    cdView.setUint16(pos, 0, true); pos += 2; // number of this disk
+    cdView.setUint16(pos, 0, true); pos += 2; // disk where CD starts
+    cdView.setUint16(pos, entries.length, true); pos += 2; // number of CD records on this disk
+    cdView.setUint16(pos, entries.length, true); pos += 2; // total number of CD records
+    cdView.setUint32(pos, summary.centralDirectorySize, true); pos += 4; // size of CD
+    cdView.setUint32(pos, summary.centralDirectoryOffset, true); pos += 4; // offset of start of CD
+    cdView.setUint16(pos, 0, true); pos += 2; // comment length
 
-    // Pass 3: Write Central Directory
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-
-      // CD Signature
-      outView.setUint32(pos, 0x02014b50, true); pos += 4;
-      outView.setUint16(pos, VERSION_MADE_BY, true); pos += 2; // version made by
-      outView.setUint16(pos, VERSION_NEEDED, true); pos += 2; // version needed
-      outView.setUint16(pos, 0x0000, true); pos += 2; // flags
-      outView.setUint16(pos, COMPRESSION_STORED, true); pos += 2; // compression
-      outView.setUint16(pos, DOS_TIME, true); pos += 2; // dos time
-      outView.setUint16(pos, DOS_DATE, true); pos += 2; // dos date
-      outView.setUint32(pos, file.crc, true); pos += 4; // crc
-      outView.setUint32(pos, file.size, true); pos += 4; // compressed size
-      outView.setUint32(pos, file.size, true); pos += 4; // uncompressed size
-      outView.setUint16(pos, file.nameBytes.length, true); pos += 2; // file name length
-      outView.setUint16(pos, 0, true); pos += 2; // extra field length
-      outView.setUint16(pos, 0, true); pos += 2; // file comment length
-      outView.setUint16(pos, 0, true); pos += 2; // disk number start
-      outView.setUint16(pos, 0, true); pos += 2; // internal attributes
-      outView.setUint32(pos, 0x00000020, true); pos += 4; // external attributes (Archive)
-      outView.setUint32(pos, file.offset, true); pos += 4; // relative offset of LFH
-
-      // File name
-      outU8.set(file.nameBytes, pos); pos += file.nameBytes.length;
-    }
-
-    // Pass 4: Write End of Central Directory
-    outView.setUint32(pos, 0x06054b50, true); pos += 4; // EOCD signature
-    outView.setUint16(pos, 0, true); pos += 2; // number of this disk
-    outView.setUint16(pos, 0, true); pos += 2; // disk where CD starts
-    outView.setUint16(pos, files.length, true); pos += 2; // number of CD records on this disk
-    outView.setUint16(pos, files.length, true); pos += 2; // total number of CD records
-    outView.setUint32(pos, cdSize, true); pos += 4; // size of CD
-    outView.setUint32(pos, cdOffset, true); pos += 4; // offset of start of CD
-    outView.setUint16(pos, 0, true); pos += 2; // comment length
-
+    parts.push(cdAndEocd);
     onProgress?.(100);
 
-    const zipBlob = new Blob([outBuffer], { type: 'application/zip' });
-    const zipFileName = await generateEphemeralSaltedName(outBuffer, 'zip', 12);
+    const zipBlob = new Blob(parts, { type: 'application/zip' });
+    // Derive 32-char lowercase hex filename deterministically from Central Directory + EOCD
+    // bytes (which commit to every entry's name, size, offset, and CRC-32) without doubling RAM.
+    const zipFileName = await generateSanitizedName(cdAndEocd, 'zip', 32);
 
     return {
       zipBlob,
-      zipFileName: `bundle_${zipFileName}`,
+      zipFileName,
     };
   } finally {
-    for (const file of files) {
-      wipeBuffer(file.data);
-    }
-    if (outBuffer) {
-      wipeBuffer(outBuffer);
+    for (const buf of tempBuffers) {
+      wipeBuffer(buf);
     }
   }
 }

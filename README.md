@@ -34,7 +34,6 @@ Mitigates:
 - PRNU Defense (`src/core/image/prnu-defense.ts`):
   1. 1-level Daubechies-4 (8-tap) 2D DWT with 5x5 subband adaptive Wiener filter (`ACTIVE_TILE_SIZE = 512`, `DWT_TILE_HALO = 16`, untouched source halo snapshot for multi-tile reads, calibrated `CALIBRATED_MAX_DELTA_LUMA = 8.0`).
   2. Bicubic Keys (`a = -0.5`) micro-affine desynchronization (rotation in +/- [0.1, 0.3] deg, anisotropic scale in [0.995, 0.999]) with premultiplied alpha handling and circular ring-buffer memory management.
-  3. CSPRNG stochastic camouflage dither.
 - Deep Decontamination (`src/core/image/decontamination.ts`, `src/core/image/poisson-gaussian.ts`):
   1. Spatial micro-resampling (premultiplied alpha Catmull-Rom bicubic).
   2. 3x3 median filter (WebGL shader with explicit `UNPACK_FLIP_Y_WEBGL` and GPU resource cleanup, with deterministic CPU `median9` fallback).
@@ -45,8 +44,8 @@ Mitigates:
 - Native RFC 9649 WebP Encoding (`src/core/image/icc-sanitizer.ts`): Encodes via native canvas WebP (`WEBP_QUALITY = 0.6`, failing closed with `WEBP_ENCODE_UNSUPPORTED` rather than silently emitting PNG), then filters RIFF chunks through a strict whitelist (`VP8 `, `VP8L`, `ALPH`, `ANIM`, `ANMF`, reconstructed `VP8X` only when needed) with zero `JUNK` chunk and zero container padding.
 
 ### MP4/MOV Container Sanitization (`src/core/media/media-sanitizer.ts`, `src/core/workers/media.worker.ts`)
-- Runs strictly in-memory in a dedicated worker (with main-thread fallback) and transfers only the exact sanitized `Uint8Array` slice (`byteOffset === 0`, `byteLength === buffer.byteLength`), zeroizing intermediate buffers in `try/finally`.
-- Validates ISOBMFF box bounds for `boxSize === 0` (to container EOF), `boxSize === 1` (64-bit `largesize >= 16`), and invalid `2 <= boxSize < 8` safely without throwing.
+- Enforces an explicit 256 MiB (`268435456` bytes) in-memory ceiling before `arrayBuffer()` allocation (`MediaFileSizeLimitError`), runs strictly in-memory in a dedicated worker (with main-thread fallback), and transfers only the exact sanitized `Uint8Array` slice (`byteOffset === 0`, `byteLength === buffer.byteLength`), zeroizing intermediate buffers in `try/finally`.
+- Validates ISOBMFF box bounds for `boxSize === 0` (to container EOF), `boxSize === 1` (64-bit `largesize >= 16`), and invalid `2 <= boxSize < 8` safely without throwing, recursing through both movie (`moov`/`trak`/`mdia`) and fragmented (`moof`/`traf`) containers.
 - Leaves `mdat` untouched and replaces scrubbed metadata boxes and non-`vide`/`soun` tracks with exact-size zero-filled `free` boxes so `stco`/`co64` offsets remain valid for playback.
 
 ### Output Finalization, SHA-256 Naming, and PKZIP Export
@@ -98,4 +97,4 @@ Static production assets are emitted to `./dist` and deployed via GitHub Actions
 
 ## 6. License
 
-MIT License. Copyright (c) 2024 Mochilamv and Antigravity AI.
+MIT License. Copyright (c) 2026 Mochilamv & Antigravity (AI).
