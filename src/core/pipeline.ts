@@ -1,8 +1,11 @@
 import { DefenseLevel, OutputFormat, SanitizedResult } from './types';
 import { sanitizeImage } from './image/image-sanitizer';
-import { sanitizeMedia } from './media/media-sanitizer';
-import { applyCryptographicPadding } from './forensic/crypto-padding';
-import { finalizeSanitizedOutput } from './forensic/finalize-output';
+import {
+  sanitizeMedia,
+  isStandaloneAudioFormat,
+  isMkvOrWebm,
+  UnsupportedMediaFormatError,
+} from './media/media-sanitizer';
 import { createAbortError } from './image/bitmap-lifecycle';
 
 export { finalizeSanitizedOutput } from './forensic/finalize-output';
@@ -16,7 +19,8 @@ export interface PipelineOptions {
 
 /**
  * Unified Anti-Forensic Processing Pipeline
- * Enforces maximum reconstructive sanitization by default.
+ * Primary priority: full pixel-level image anti-forensics (pure TypeScript, WebP output).
+ * Secondary scope: in-memory MP4/MOV container metadata sanitization without re-encoding.
  */
 export async function processMediaFile(
   file: File,
@@ -26,19 +30,42 @@ export async function processMediaFile(
   const mime = file.type.toLowerCase();
   const name = file.name.toLowerCase();
 
-  // Always enforce maximum protection
   const defenseLevel: DefenseLevel = options.defenseLevel || 'paranoid';
   const quality = options.quality ?? 0.85;
 
   const isImage = mime.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp|gif|tiff)$/i.test(name);
-  const isVideoOrAudio = mime.startsWith('video/') || mime.startsWith('audio/') || /\.(mp4|mov|mkv|webm|mp3|wav|ogg|aac|m4a)$/i.test(name);
+  if (isStandaloneAudioFormat(mime, name)) {
+    throw new UnsupportedMediaFormatError(
+      'AUDIO_UNSUPPORTED',
+      `Standalone audio format is not supported: MIME="${mime}" name="${name}". Only images (JPEG, PNG, WebP, BMP, TIFF, GIF) and MP4/MOV videos are accepted.`
+    );
+  }
+
+  if (isMkvOrWebm(mime, name)) {
+    throw new UnsupportedMediaFormatError(
+      'CONTAINER_UNSUPPORTED',
+      `MKV/WebM video containers are not supported: MIME="${mime}" name="${name}". Only MP4 and MOV container metadata sanitization is supported.`
+    );
+  }
+
+  const isSupportedVideo =
+    mime === 'video/mp4' ||
+    mime === 'video/quicktime' ||
+    /\.(mp4|mov)$/i.test(name);
+
+  if (!isSupportedVideo && mime.startsWith('video/')) {
+    throw new UnsupportedMediaFormatError(
+      'CONTAINER_UNSUPPORTED',
+      `Unsupported video container: MIME="${mime}" name="${name}". Only MP4 and MOV container metadata sanitization is supported.`
+    );
+  }
 
   if (options.signal?.aborted) {
     throw createAbortError(options.signal.reason);
   }
 
   if (isImage) {
-    const isLossless = mime === 'image/png' || name.toLowerCase().endsWith('.png');
+    const isLossless = mime === 'image/png' || name.endsWith('.png');
     const outputFormat = isLossless ? 'image/png' : 'image/webp';
     const sanitized = await sanitizeImage(file, {
       defenseLevel,
@@ -49,48 +76,22 @@ export async function processMediaFile(
     if (options.signal?.aborted) {
       throw createAbortError(options.signal.reason);
     }
-    const paddedBlob = await applyCryptographicPadding(sanitized.blob, sanitized.blob.type, true);
-    if (options.signal?.aborted) {
-      throw createAbortError(options.signal.reason);
-    }
-    const finalized = await finalizeSanitizedOutput(paddedBlob, paddedBlob.type);
-    if (options.signal?.aborted) {
-      throw createAbortError(options.signal.reason);
-    }
-    if (finalized.sha256 === sanitized.auditBefore.sha256) {
+    if (sanitized.sha256 === sanitized.auditBefore.sha256) {
       throw new Error('Mandatory re-synthesis invariant violated: output SHA-256 must diverge from input');
     }
-    return {
-      ...sanitized,
-      blob: finalized.blob,
-      sanitizedName: finalized.sanitizedName,
-      sanitizedSize: finalized.sanitizedSize,
-      format: finalized.format,
-      sha256: finalized.sha256,
-      auditAfter: finalized.auditAfter,
-    };
+    return sanitized;
   }
 
-  if (isVideoOrAudio) {
-    const sanitized = await sanitizeMedia(file, {
+  if (isSupportedVideo) {
+    return sanitizeMedia(file, {
       defenseLevel,
+      signal: options.signal,
     }, onProgress);
-    const paddedBlob = await applyCryptographicPadding(sanitized.blob, sanitized.blob.type);
-    const finalized = await finalizeSanitizedOutput(paddedBlob, paddedBlob.type);
-    return {
-      ...sanitized,
-      blob: finalized.blob,
-      sanitizedName: finalized.sanitizedName,
-      sanitizedSize: finalized.sanitizedSize,
-      format: finalized.format,
-      sha256: finalized.sha256,
-      auditAfter: finalized.auditAfter,
-    };
   }
 
   // No fallback: unrecognized file types are strictly rejected
   throw new Error(
     `Unsupported file type: MIME="${mime}" name="${name}". ` +
-    'Only image (JPEG, PNG, WebP, BMP, TIFF, GIF) and media (MP4, MOV, MKV, WebM, MP3, WAV, OGG, AAC, M4A) formats are accepted.'
+    'Only image (JPEG, PNG, WebP, BMP, TIFF, GIF) and video (MP4, MOV) formats are accepted.'
   );
 }

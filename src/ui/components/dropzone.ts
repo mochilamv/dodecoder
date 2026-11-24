@@ -6,11 +6,11 @@ export function renderDropzone(onFilesSelected: (files: File[]) => void): HTMLEl
     'relative my-12 sm:my-20 py-20 sm:py-28 flex flex-col items-center justify-center text-center cursor-pointer select-none transition-all duration-150 bg-[#000000] focus-visible:outline-2 focus-visible:outline-[#00FF00] outline-offset-4';
   dropzone.setAttribute('tabindex', '0');
   dropzone.setAttribute('role', 'button');
-  dropzone.setAttribute('aria-label', 'Sanitization Dropzone: Drop image, video, or audio files to sanitize. Batch processing for images, videos, and audio. Reconstruction.');
-  dropzone.setAttribute('title', 'Batch processing for images, videos, and audio. Reconstruction.');
+  dropzone.setAttribute('aria-label', 'Sanitization Dropzone: Drop image or MP4/MOV video files to sanitize. Batch processing for images and MP4/MOV videos.');
+  dropzone.setAttribute('title', 'Batch processing for images and MP4/MOV videos.');
 
   dropzone.innerHTML = `
-    <input type="file" id="file-input" multiple accept="image/*,video/*,audio/*,.jpg,.jpeg,.png,.webp,.bmp,.tiff,.mp4,.mov,.mp3,.wav,.ogg" class="hidden" />
+    <input type="file" id="file-input" multiple accept="image/*,video/mp4,video/quicktime,.jpg,.jpeg,.png,.webp,.bmp,.gif,.tiff,.mp4,.mov" class="hidden" />
 
     <div class="flex flex-col items-center justify-center space-y-4 pointer-events-none">
       <div class="text-[#FFFFFF]">
@@ -19,10 +19,10 @@ export function renderDropzone(onFilesSelected: (files: File[]) => void): HTMLEl
 
       <div class="space-y-2">
         <div class="text-sm sm:text-base font-mono tracking-wider text-[#FFFFFF] uppercase">
-          Drop media here or browse
+          Drop images or MP4/MOV here or browse
         </div>
         <p class="text-xs font-mono text-[#FFFFFF]/70 max-w-md mx-auto">
-          Batch processing for images, videos, and audio. Reconstruction.
+          Batch processing for images (primary) and MP4/MOV container metadata.
         </p>
       </div>
 

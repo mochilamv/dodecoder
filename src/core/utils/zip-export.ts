@@ -186,6 +186,43 @@ function crc32(buffer: Uint8Array): number {
 const encoder = new TextEncoder();
 
 /**
+ * Deterministically deduplicates colliding ZIP entry filenames (case-insensitively),
+ * including cascading collisions such as ["a.webp", "a.webp", "a-2.webp"].
+ * Runs strictly BEFORE assertZipFits so expanded filenames are accounted for in bounds checks.
+ */
+export function deduplicateZipEntryNames(names: readonly string[]): string[] {
+  const usedLower = new Set<string>();
+  const result: string[] = new Array(names.length);
+
+  for (let i = 0; i < names.length; i++) {
+    const rawName = names[i];
+    const rawKey = rawName.toLowerCase();
+    if (!usedLower.has(rawKey)) {
+      usedLower.add(rawKey);
+      result[i] = rawName;
+      continue;
+    }
+
+    const lastDot = rawName.lastIndexOf('.');
+    const hasExt = lastDot > 0 && lastDot < rawName.length - 1;
+    const stem = hasExt ? rawName.slice(0, lastDot) : rawName;
+    const ext = hasExt ? rawName.slice(lastDot) : '';
+
+    let suffix = 2;
+    let candidate = `${stem}-${suffix}${ext}`;
+    while (usedLower.has(candidate.toLowerCase())) {
+      suffix++;
+      candidate = `${stem}-${suffix}${ext}`;
+    }
+
+    usedLower.add(candidate.toLowerCase());
+    result[i] = candidate;
+  }
+
+  return result;
+}
+
+/**
  * Normalizes all file timestamps inside a ZIP archive to MS-DOS Epoch (1980-01-01 00:00:00).
  * Prevents OS filesystem timestamps, Extra Fields, and OS Versions from leaking.
  * Uses 0-dependency pure DataView binary serialization.
@@ -194,8 +231,9 @@ export async function createSanitizedZipBundle(
   items: SanitizedResult[],
   onProgress?: (percent: number) => void
 ): Promise<{ zipBlob: Blob; zipFileName: string }> {
-  // Pre-allocation validation before reading any Blob into RAM
-  const encodedNames = items.map(item => encoder.encode(item.sanitizedName));
+  // Deduplicate colliding entry filenames strictly BEFORE pre-allocation size validation
+  const uniqueNames = deduplicateZipEntryNames(items.map(item => item.sanitizedName));
+  const encodedNames = uniqueNames.map(name => encoder.encode(name));
   assertZipFits(
     items.map((item, i) => ({
       nameByteLength: encodedNames[i].length,

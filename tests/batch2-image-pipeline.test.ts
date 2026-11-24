@@ -751,22 +751,33 @@ function installImagePipelineDomMocks(opts: {
   return { createdBitmaps, restore };
 }
 
+function makeValidMinimalJpeg(width: number, height: number): Uint8Array {
+  return new Uint8Array([
+    0xff, 0xd8,
+    0xff, 0xc0, 0x00, 0x0b, 0x08,
+    (height >> 8) & 0xff, height & 0xff,
+    (width >> 8) & 0xff, width & 0xff,
+    0x01, 0x01, 0x11, 0x00,
+    0xff, 0xd9,
+  ]);
+}
+
 test('AUD-03 [MOCK-CONTRACT]: sanitizeImage closes every created ImageBitmap exactly once even when drawImage throws', async () => {
   const { sanitizeImage } = await import('../src/core/image/image-sanitizer');
   const mocks = installImagePipelineDomMocks({
     width: 16,
     height: 16,
-    throwOnDrawCall: 1, // Fail inside applyPrnuDefense drawImage while tileBitmap is live
+    throwOnDrawCall: 1, // Fail inside applyPrnuDefense drawImage while bitmap is live
   });
 
   try {
-    const file = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], 'sample.jpg', { type: 'image/jpeg' });
+    const file = new File([makeValidMinimalJpeg(16, 16)], 'sample.jpg', { type: 'image/jpeg' });
     await assert.rejects(
       () => sanitizeImage(file, { defenseLevel: 'paranoid', outputFormat: 'image/webp' }),
       /MOCK_DRAW_FAILURE_1/
     );
 
-    assert.ok(mocks.createdBitmaps.length >= 2, 'Expected metaBitmap and tileBitmap to be created');
+    assert.equal(mocks.createdBitmaps.length, 1, 'Expected single-pass decoded bitmap to be created');
     for (const bm of mocks.createdBitmaps) {
       assert.equal(bm.closeCalls, 1, `Bitmap #${bm.id} leaked: close() called ${bm.closeCalls} times`);
     }
@@ -779,18 +790,18 @@ test('AUD-03 [MOCK-CONTRACT]: ImageBitmap.close() covers success, downscale-thro
   const { sanitizeImage, withManagedImageBitmap } = await import('../src/core/image/image-sanitizer');
   const { processImageWorkerJob } = await import('../src/core/workers/image.worker');
 
-  // 1. Success path with downscale (>1920px creates metaBitmap, rawBitmap, tileBitmap = 3 bitmaps) in both worker & main thread
+  // 1. Success path with downscale (>1920px creates 1 bitmap in single-pass AUD-04 pipeline)
   {
     const mocks = installImagePipelineDomMocks({ width: 2400, height: 1200 });
     try {
       const workerOut = await processImageWorkerJob({
-        buffer: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]).buffer,
+        buffer: makeValidMinimalJpeg(2400, 1200).buffer,
         mimeType: 'image/jpeg',
         options: { defenseLevel: 'hardened' },
         needsAlpha: false,
       });
       assert.ok(workerOut.buffer.byteLength >= 12);
-      assert.equal(mocks.createdBitmaps.length, 3, 'Worker downscale path creates 3 bitmaps');
+      assert.equal(mocks.createdBitmaps.length, 1, 'Worker single-pass downscale path creates 1 bitmap');
       for (const bm of mocks.createdBitmaps) {
         assert.equal(bm.closeCalls, 1, `Worker success bitmap #${bm.id} must close exactly once`);
       }
@@ -799,20 +810,20 @@ test('AUD-03 [MOCK-CONTRACT]: ImageBitmap.close() covers success, downscale-thro
     }
   }
 
-  // 2. Throw during downscale drawImage in worker closes both metaBitmap and rawBitmap
+  // 2. Throw during downscale drawImage in worker closes the single decoded bitmap
   {
     const mocks = installImagePipelineDomMocks({ width: 2400, height: 1200, throwOnDrawCall: 1 });
     try {
       await assert.rejects(
         () => processImageWorkerJob({
-          buffer: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]).buffer,
+          buffer: makeValidMinimalJpeg(2400, 1200).buffer,
           mimeType: 'image/jpeg',
           options: { defenseLevel: 'hardened' },
           needsAlpha: false,
         }),
         /MOCK_DRAW_FAILURE_1/
       );
-      assert.equal(mocks.createdBitmaps.length, 2, 'metaBitmap and rawBitmap created before downscale failure');
+      assert.equal(mocks.createdBitmaps.length, 1, 'Decoded bitmap created before downscale failure');
       for (const bm of mocks.createdBitmaps) {
         assert.equal(bm.closeCalls, 1, `Worker downscale-throw bitmap #${bm.id} must close exactly once`);
       }
@@ -843,7 +854,7 @@ test('AUD-03 [MOCK-CONTRACT]: ImageBitmap.close() covers success, downscale-thro
     try {
       await assert.rejects(
         () => processImageWorkerJob({
-          buffer: new Uint8Array([0xff, 0xd8]).buffer,
+          buffer: makeValidMinimalJpeg(16, 16).buffer,
           mimeType: 'image/jpeg',
           options: { defenseLevel: 'hardened' },
           needsAlpha: false,
@@ -934,7 +945,7 @@ test('AUD-03 [MOCK-CONTRACT]: ImageBitmap.close() covers success, downscale-thro
       }
     };
     try {
-      const file = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], 'sample.jpg', { type: 'image/jpeg' });
+      const file = new File([makeValidMinimalJpeg(16, 16)], 'sample.jpg', { type: 'image/jpeg' });
       await assert.rejects(
         () => sanitizeImage(file, { defenseLevel: 'paranoid', outputFormat: 'image/webp' }),
         /WEBP_ENCODE_UNSUPPORTED/

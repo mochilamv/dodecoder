@@ -18,15 +18,6 @@ const MIME_TO_EXT: Record<string, string> = {
   'image/jpg': 'jpg',
   'video/mp4': 'mp4',
   'video/quicktime': 'mov',
-  'video/webm': 'webm',
-  'video/x-matroska': 'mkv',
-  'audio/wav': 'wav',
-  'audio/wave': 'wav',
-  'audio/mpeg': 'mp3',
-  'audio/mp3': 'mp3',
-  'audio/ogg': 'ogg',
-  'audio/aac': 'aac',
-  'audio/mp4': 'm4a',
 };
 
 function detectDeliveredContainer(
@@ -49,21 +40,10 @@ function detectDeliveredContainer(
       return { mime: 'image/webp', ext: 'webp' };
     }
 
-    // RIFF .... WAVE
-    if (
-      b0 === 0x52 && b1 === 0x49 && b2 === 0x46 && b3 === 0x46 &&
-      b8 === 0x57 && b9 === 0x41 && b10 === 0x56 && b11 === 0x45
-    ) {
-      return { mime: 'audio/wav', ext: 'wav' };
-    }
-
     // ISOBMFF .... ftyp
     if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
       if (normalizedDeclared === 'video/quicktime') {
         return { mime: 'video/quicktime', ext: 'mov' };
-      }
-      if (normalizedDeclared === 'audio/mp4') {
-        return { mime: 'audio/mp4', ext: 'm4a' };
       }
       return { mime: 'video/mp4', ext: 'mp4' };
     }

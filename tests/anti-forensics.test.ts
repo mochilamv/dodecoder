@@ -91,7 +91,7 @@ test('4. Zero-Trace ZIP Bundle Timestamp Normalization', async () => {
   assert.equal(extraFieldLength, 0x0000, 'Extra field length must be exactly 0');
 });
 
-test('5. MP4 In-Place Mutation, Size Preservation, and Banner Zeroing', async () => {
+test('5. MP4 In-Place Container Scrubbing, Size Preservation, and Playable mdat Integrity', async () => {
   const syntheticMp4 = new Uint8Array([
     // ftyp (16 bytes)
     0x00, 0x00, 0x00, 0x10, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x02, 0x00,
@@ -147,9 +147,13 @@ test('5. MP4 In-Place Mutation, Size Preservation, and Banner Zeroing', async ()
   assert.equal(cleanView.getUint32(mdhdOffset + 12, false), 0, 'creation time zeroed');
   assert.equal(cleanView.getUint32(mdhdOffset + 16, false), 0, 'mod time zeroed');
 
-  // Check mdat banner was wiped
-  const hasBanner = cleanBytes.some((_, i) => i + 11 <= cleanBytes.length && new TextDecoder().decode(cleanBytes.slice(i, i+11)) === 'x264 - core');
-  assert.equal(hasBanner, false, 'x264 - core banner must be wiped');
+  // Check mdat payload stays byte-for-byte intact so H.264/H.265 bitstreams remain playable (AUD-12)
+  const mdatPayloadOffset = syntheticMp4.length - 16;
+  assert.deepEqual(
+    cleanBytes.subarray(mdatPayloadOffset),
+    syntheticMp4.subarray(mdatPayloadOffset),
+    'mdat bitstream payload must remain intact (no blind 256-byte zeroing)'
+  );
 });
 
 test('6. Display Calibration and ICC Profile Stripping (iCCP, cHRM, gAMA, APP2, WebP ICCP)', async () => {
@@ -467,12 +471,10 @@ test('13. Enforced Unified Lossy VP8 Pipeline, Bypass Suppression, and Image Gua
     assert.equal(isImageMimeType(mime, name), true, `isImageMimeType must reject: MIME="${mime}" name="${name}"`);
   }
 
-  // Verify isImageMimeType correctly allows media types
+  // Verify isImageMimeType correctly allows supported video media types
   const mediaInputs: Array<[string, string]> = [
     ['video/mp4', 'clip.mp4'],
-    ['audio/mpeg', 'track.mp3'],
     ['video/quicktime', 'recording.mov'],
-    ['audio/wav', 'sample.wav'],
   ];
 
   for (const [mime, name] of mediaInputs) {
@@ -506,7 +508,7 @@ test('14. Forced YUV 4:2:0 Chroma Subsampling destroys color-channel steganograp
 });
 
 test('15. Mandatory One-Way Image Re-Synthesis and Hard Boundary Isolation of In-Place Manipulation', async () => {
-  const { isMp4OrMov, isAudioFile, isImageMimeType, sanitizeMedia } = await import('../src/core/media/media-sanitizer');
+  const { isMp4OrMov, isImageMimeType, sanitizeMedia } = await import('../src/core/media/media-sanitizer');
 
   // 1. Verify in-place structural manipulation is strictly rejected for all image types
   const imageFormats = [
@@ -520,14 +522,12 @@ test('15. Mandatory One-Way Image Re-Synthesis and Hard Boundary Isolation of In
   for (const img of imageFormats) {
     const bytes = new Uint8Array([...img.magic, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
     assert.equal(isMp4OrMov(bytes), false, `${img.name} must never be classified as MP4/MOV`);
-    assert.equal(isAudioFile(img.mime, img.name), false, `${img.name} must never be classified as audio`);
     assert.equal(isImageMimeType(img.mime, img.name), true, `${img.name} must be classified as image by isImageMimeType`);
   }
 
-  // 2. Verify media classifiers accept valid MP4/MOV and audio formats
+  // 2. Verify media classifier accepts valid MP4/MOV header
   const mp4Header = new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
-  assert.equal(isMp4OrMov(mp4Header), true, 'ISOBMFF header must be recognized for in-place mutation');
-  assert.equal(isAudioFile('audio/mpeg', 'track.mp3'), true, 'MP3 audio must be recognized for audio stripping');
+  assert.equal(isMp4OrMov(mp4Header), true, 'ISOBMFF header must be recognized for MP4/MOV container sanitization');
 
   // 3. Verify sanitizeMedia THROWS for image payloads (hard boundary enforcement)
   for (const img of imageFormats) {
@@ -633,40 +633,6 @@ test('20. Spatial Grid Tiling Dimensions', async () => {
   assert.equal(typeof sanitizeImage, 'function');
 });
 
-test('21. Electrical Network Frequency (ENF) Digital Notch Rejection Filters', async () => {
-  const { createNotchCoeffs, filterChannelInPlace, getEnfTargetFrequencies } = await import('../src/core/media/enf-filter');
-  
-  const fs = 48000;
-  const targetFreqs = getEnfTargetFrequencies(fs, 1200);
-  assert.ok(targetFreqs.includes(50), 'Must include 50Hz fundamental');
-  assert.ok(targetFreqs.includes(60), 'Must include 60Hz fundamental');
-  assert.ok(targetFreqs.includes(100), 'Must include 100Hz harmonic');
-  assert.ok(targetFreqs.includes(120), 'Must include 120Hz harmonic');
-
-  // Synthesize 50Hz pure tone (1.0s)
-  const durationSec = 1.0;
-  const numSamples = Math.floor(fs * durationSec);
-  const signal = new Float32Array(numSamples);
-  for (let i = 0; i < numSamples; i++) {
-    signal[i] = Math.sin((2 * Math.PI * 50 * i) / fs);
-  }
-
-  // Measure initial RMS
-  let sumSqBefore = 0;
-  for (let i = Math.floor(numSamples / 2); i < numSamples; i++) sumSqBefore += signal[i] * signal[i];
-  const rmsBefore = Math.sqrt(sumSqBefore / (numSamples / 2));
-
-  filterChannelInPlace(signal, fs, 1200);
-
-  // Measure filtered RMS
-  let sumSqAfter = 0;
-  for (let i = Math.floor(numSamples / 2); i < numSamples; i++) sumSqAfter += signal[i] * signal[i];
-  const rmsAfter = Math.sqrt(sumSqAfter / (numSamples / 2));
-
-  // Notch filter must heavily attenuate the 50Hz tone (> 20dB reduction)
-  assert.ok(rmsAfter < rmsBefore * 0.1, `ENF 50Hz tone must be attenuated by at least 20dB. Before: ${rmsBefore}, After: ${rmsAfter}`);
-});
-
 test('22. Pure TypeScript Zero-WASM Architecture Invariant (AUD-23)', async () => {
   const fs = await import('node:fs');
   const path = await import('node:path');
@@ -697,138 +663,6 @@ test('23. Poisson-Gaussian Heteroscedastic CMOS Noise Variance Model', async () 
   assert.ok(midSigma < brightSigma, 'Mid-tones must yield lower variance than bright luminance');
   assert.ok(Math.abs(darkSigma - Math.sqrt(0.02 * 10 + 1.0)) < 1e-6);
   assert.ok(Math.abs(brightSigma - Math.sqrt(0.02 * 255 + 1.0)) < 1e-6);
-});
-
-test('24. Ephemeral AES-GCM OPFS TransformStream and Memory Key Zeroization', async () => {
-  const { createEphemeralOpfsSession } = await import('../src/core/media/encrypted-stream');
-  
-  const session = await createEphemeralOpfsSession();
-  const plaintext = new TextEncoder().encode('Sensitive biometric and hardware video bitstream metadata');
-  
-  const encrypted = await session.encryptChunk(plaintext);
-  
-  // Ciphertext must not match plaintext
-  assert.notDeepEqual(encrypted, plaintext);
-  assert.ok(encrypted.length > plaintext.length);
-
-  const decrypted = await session.decryptChunk(encrypted);
-  assert.deepEqual(decrypted, plaintext, 'Decrypted payload must match plaintext before key zeroization');
-
-  // Zeroize volatile key in RAM
-  session.zeroize();
-
-  // Any subsequent attempt to encrypt or decrypt must fail
-  await assert.rejects(
-    async () => await session.encryptChunk(plaintext),
-    /zeroized/,
-    'Encryption must be permanently barred after key zeroization'
-  );
-  await assert.rejects(
-    async () => await session.decryptChunk(encrypted),
-    /zeroized/,
-    'Decryption must be permanently impossible after key zeroization'
-  );
-});
-
-test('25. WebCodecs Resynthesis & Media Sanitizer Sprint 4 Metadata', async () => {
-  const { sanitizeMedia } = await import('../src/core/media/media-sanitizer');
-  
-  const audioBytes = new Uint8Array([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0a, ...new Array(100).fill(0)]);
-  const dummyFile = new File([audioBytes], 'test_audio.mp3', { type: 'audio/mp3' });
-
-  const result = await sanitizeMedia(dummyFile, { defenseLevel: 'hardened' });
-  
-  assert.equal(result.enfFiltered, true, 'Result must reflect ENF filter application');
-  assert.equal(typeof result.sha256, 'string');
-});
-
-test('26. Cryptographic Padding Directive: WebP / RIFF', async () => {
-  const { applyCryptographicPadding, computeDynamicPaddedSize } = await import('../src/core/forensic/crypto-padding');
-  
-  // Construct a minimal dummy RIFF file (WebP)
-  const size = 1500;
-  const header = new Uint8Array(12);
-  const dv = new DataView(header.buffer);
-  
-  dv.setUint8(0, 0x52); // R
-  dv.setUint8(1, 0x49); // I
-  dv.setUint8(2, 0x46); // F
-  dv.setUint8(3, 0x46); // F
-  
-  dv.setUint32(4, size - 8, true); // size
-  
-  dv.setUint8(8, 0x57); // W
-  dv.setUint8(9, 0x45); // E
-  dv.setUint8(10, 0x42); // B
-  dv.setUint8(11, 0x50); // P
-  
-  const body = new Uint8Array(size - 12);
-  const blob = new Blob([header, body], { type: 'image/webp' });
-  
-  const paddedBlob = await applyCryptographicPadding(blob, 'image/webp', true);
-  const expectedSize = computeDynamicPaddedSize(size);
-  
-  assert.equal(paddedBlob.size, expectedSize, `Final padded size must match Padme-H target (${expectedSize})`);
-  assert.equal(paddedBlob.type, 'image/webp', 'MIME type must be preserved');
-  assert.ok(paddedBlob.size - size >= 8, 'Padding headroom must strictly accommodate chunk header');
-  
-  // Check new RIFF header size
-  const newHeader = new Uint8Array(await paddedBlob.slice(0, 12).arrayBuffer());
-  const newDv = new DataView(newHeader.buffer);
-  const newRiffSize = newDv.getUint32(4, true);
-  assert.equal(newRiffSize + 8, expectedSize, 'Main RIFF header size must reflect the padded size');
-});
-
-test('27. Cryptographic Padding Directive: MP4 / ISOBMFF', async () => {
-  const { applyCryptographicPadding, computeDynamicPaddedSize } = await import('../src/core/forensic/crypto-padding');
-  
-  const size = 20000;
-  const header = new Uint8Array(12);
-  const dv = new DataView(header.buffer);
-  
-  dv.setUint32(0, 20, false); // ftyp size
-  dv.setUint8(4, 0x66); // f
-  dv.setUint8(5, 0x74); // t
-  dv.setUint8(6, 0x79); // y
-  dv.setUint8(7, 0x70); // p
-  
-  const body = new Uint8Array(size - 12);
-  const blob = new Blob([header, body], { type: 'video/mp4' });
-  
-  const paddedBlob = await applyCryptographicPadding(blob, 'video/mp4');
-  const expectedSize = computeDynamicPaddedSize(size);
-  
-  assert.equal(paddedBlob.size, expectedSize, `Final padded size must match Padme-H target (${expectedSize})`);
-  assert.equal(paddedBlob.type, 'video/mp4', 'MIME type must be preserved');
-  assert.ok(paddedBlob.size - size >= 8, 'Padding headroom must strictly accommodate box header');
-});
-
-test('28. Cryptographic Padding Sub-Header Boundary Expansion', async () => {
-  const { applyCryptographicPadding, computeDynamicPaddedSize } = await import('../src/core/forensic/crypto-padding');
-
-  const testVectors = [4, 32768, 524288, 10485760];
-  for (const v of testVectors) {
-    const padded = computeDynamicPaddedSize(v);
-    assert.ok(padded >= v + 8, `Padded size (${padded}) must accommodate payload (${v}) + header (8)`);
-    assert.equal(padded % 2, 0, 'Target size must be 2-byte aligned');
-  }
-
-  const boundarySize = 1020;
-  const header = new Uint8Array(12);
-  const dv = new DataView(header.buffer);
-  dv.setUint32(0, 20, false);
-  dv.setUint8(4, 0x66);
-  dv.setUint8(5, 0x74);
-  dv.setUint8(6, 0x79);
-  dv.setUint8(7, 0x70);
-
-  const body = new Uint8Array(boundarySize - 12);
-  const blob = new Blob([header, body], { type: 'video/mp4' });
-
-  const paddedBlob = await applyCryptographicPadding(blob, 'video/mp4');
-  const expectedBoundary = computeDynamicPaddedSize(boundarySize);
-  assert.equal(paddedBlob.size, expectedBoundary, 'Boundary size must strictly resolve to expected Padme-H target');
-  assert.ok(paddedBlob.size - boundarySize >= 8, 'Must accommodate header without recursion');
 });
 
 test('29. median9 selection network equals full-sort median', async () => {
@@ -869,5 +703,6 @@ test('29. median9 selection network equals full-sort median', async () => {
 
 import './batch2-image-pipeline.test';
 import './batch1-security-reliability.test';
+import './batch3-closure.test';
 
 

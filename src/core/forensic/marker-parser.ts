@@ -59,15 +59,26 @@ export function inspectBinaryMarkers(buffer: ArrayBuffer): MarkerInfo[] {
   }
 
   // Check MP4/MOV ('ftyp')
-  if (bytes.length > 12 && view.getUint32(4, false) === 0x66747970) {
+  if (bytes.length >= 12 && view.getUint32(4, false) === 0x66747970) {
     return inspectMp4Boxes(bytes, view);
   }
 
   return markers;
 }
 
+function isJpegStandaloneMarker(markerByte: number): boolean {
+  return (
+    markerByte === 0x01 || // TEM
+    (markerByte >= 0xd0 && markerByte <= 0xd7) || // RST0..RST7
+    markerByte === 0xd8 || // SOI
+    markerByte === 0xd9    // EOI
+  );
+}
+
 /**
- * Inspects raw JPEG markers
+ * Inspects raw JPEG markers.
+ * Handles repeated 0xFF fill bytes, standalone lengthless markers (SOI/EOI/TEM/RST0..7),
+ * and 0xFF00 byte-stuffing plus RST markers inside entropy-coded SOS scan data.
  */
 function inspectJpegMarkers(bytes: Uint8Array): MarkerInfo[] {
   const markers: MarkerInfo[] = [];
@@ -88,10 +99,16 @@ function inspectJpegMarkers(bytes: Uint8Array): MarkerInfo[] {
       continue;
     }
 
-    const markerByte = bytes[offset + 1];
+    // Consume any repeated 0xFF fill bytes; record start of final 0xFF before marker byte
+    let markerPos = offset;
+    while (markerPos + 1 < len && bytes[markerPos + 1] === 0xff) {
+      markerPos++;
+    }
+    if (markerPos + 1 >= len) break;
 
-    if (markerByte === 0xff || markerByte === 0x00) {
-      offset++;
+    const markerByte = bytes[markerPos + 1];
+    if (markerByte === 0x00) {
+      offset = markerPos + 2;
       continue;
     }
 
@@ -99,7 +116,7 @@ function inspectJpegMarkers(bytes: Uint8Array): MarkerInfo[] {
 
     if (markerByte === 0xd9) {
       markers.push({
-        offset,
+        offset: markerPos,
         marker: markerHex,
         name: 'EOI (End of Image)',
         isSanitizedSafe: true,
@@ -108,26 +125,75 @@ function inspectJpegMarkers(bytes: Uint8Array): MarkerInfo[] {
       break;
     }
 
-    if (markerByte === 0xda) {
+    if (isJpegStandaloneMarker(markerByte)) {
+      const name =
+        markerByte === 0x01
+          ? 'TEM (Temporary Arithmetic Coding)'
+          : markerByte === 0xd8
+            ? 'SOI (Start of Image)'
+            : `RST${markerByte - 0xd0} (Restart Marker)`;
       markers.push({
-        offset,
+        offset: markerPos,
         marker: markerHex,
-        name: 'SOS (Start of Scan)',
+        name,
         isSanitizedSafe: true,
-        description: 'Compressed image pixel bitstream follows',
+        description: 'Standalone lengthless JPEG marker',
       });
-      offset += 2;
-      while (offset < len - 1) {
-        if (bytes[offset] === 0xff && bytes[offset + 1] !== 0x00 && bytes[offset + 1] <= 0xd9) {
-          break;
-        }
-        offset++;
-      }
+      offset = markerPos + 2;
       continue;
     }
 
-    if (offset + 3 >= len) break;
-    const markerLength = (bytes[offset + 2] << 8) | bytes[offset + 3];
+    if (markerByte === 0xda) {
+      // SOS has a 2-byte length header followed by entropy-coded scan data
+      if (markerPos + 3 >= len) {
+        markers.push({
+          offset: markerPos,
+          marker: markerHex,
+          name: 'SOS (Start of Scan)',
+          isSanitizedSafe: true,
+          description: 'Compressed image pixel bitstream follows',
+        });
+        break;
+      }
+      const sosHeaderLen = (bytes[markerPos + 2] << 8) | bytes[markerPos + 3];
+      markers.push({
+        offset: markerPos,
+        marker: markerHex,
+        name: 'SOS (Start of Scan)',
+        length: sosHeaderLen,
+        isSanitizedSafe: true,
+        description: 'Compressed image pixel bitstream follows',
+      });
+      if (sosHeaderLen < 2 || markerPos + 2 + sosHeaderLen > len) break;
+
+      let scanPos = markerPos + 2 + sosHeaderLen;
+      let nextMarkerPos = len;
+      while (scanPos < len - 1) {
+        if (bytes[scanPos] !== 0xff) {
+          scanPos++;
+          continue;
+        }
+        let ffEnd = scanPos;
+        while (ffEnd + 1 < len && bytes[ffEnd + 1] === 0xff) {
+          ffEnd++;
+        }
+        if (ffEnd + 1 >= len) break;
+        const nextByte = bytes[ffEnd + 1];
+        // Ignore 0xFF00 byte-stuffing and RST0..RST7 inside entropy-coded scan
+        if (nextByte === 0x00 || (nextByte >= 0xd0 && nextByte <= 0xd7)) {
+          scanPos = ffEnd + 2;
+          continue;
+        }
+        nextMarkerPos = ffEnd;
+        break;
+      }
+      offset = nextMarkerPos;
+      continue;
+    }
+
+    if (markerPos + 3 >= len) break;
+    const markerLength = (bytes[markerPos + 2] << 8) | bytes[markerPos + 3];
+    if (markerLength < 2 || markerPos + 2 + markerLength > len) break;
 
     let name = `Segment (${markerHex})`;
     let isSafe = false;
@@ -142,10 +208,11 @@ function inspectJpegMarkers(bytes: Uint8Array): MarkerInfo[] {
       case 0xe1: {
         // Fast byte check for 'Exif' (0x45 0x78 0x69 0x66)
         if (
-          bytes[offset + 4] === 0x45 &&
-          bytes[offset + 5] === 0x78 &&
-          bytes[offset + 6] === 0x69 &&
-          bytes[offset + 7] === 0x66
+          markerPos + 7 < len &&
+          bytes[markerPos + 4] === 0x45 &&
+          bytes[markerPos + 5] === 0x78 &&
+          bytes[markerPos + 6] === 0x69 &&
+          bytes[markerPos + 7] === 0x66
         ) {
           name = 'APP1 (EXIF / GPS / IFD1 Thumbnail)';
           isSafe = false;
@@ -202,7 +269,7 @@ function inspectJpegMarkers(bytes: Uint8Array): MarkerInfo[] {
     }
 
     markers.push({
-      offset,
+      offset: markerPos,
       marker: markerHex,
       name,
       length: markerLength,
@@ -210,7 +277,7 @@ function inspectJpegMarkers(bytes: Uint8Array): MarkerInfo[] {
       description,
     });
 
-    offset += 2 + markerLength;
+    offset = markerPos + 2 + markerLength;
   }
 
   return markers;
@@ -401,19 +468,56 @@ function inspectWebPChunks(_bytes: Uint8Array, view: DataView): MarkerInfo[] {
   return markers;
 }
 
+const FOURCC_MOOV = 0x6d6f6f76;
+const FOURCC_TRAK = 0x7472616b;
+const FOURCC_MDIA = 0x6d646961;
+const MP4_MAX_INSPECT_DEPTH = 8;
+
 /**
- * Inspects MP4/MOV top-level boxes
+ * Inspects MP4/MOV boxes with bounded recursion into moov/trak/mdia containers.
+ * Safely handles boxSize === 0 (to container EOF), boxSize === 1 (64-bit largesize >= 16),
+ * and invalid 2 <= boxSize < 8 without throwing or infinite-looping.
  */
 function inspectMp4Boxes(_bytes: Uint8Array, view: DataView): MarkerInfo[] {
   const markers: MarkerInfo[] = [];
-  let offset = 0;
-  const len = view.byteLength;
+  inspectMp4BoxRange(view, 0, view.byteLength, 0, markers);
+  return markers;
+}
 
-  while (offset + 8 <= len) {
-    const boxSize = view.getUint32(offset, false);
+function inspectMp4BoxRange(
+  view: DataView,
+  start: number,
+  end: number,
+  depth: number,
+  markers: MarkerInfo[]
+): void {
+  if (depth > MP4_MAX_INSPECT_DEPTH) return;
+  let offset = start;
+
+  while (offset + 8 <= end) {
+    const rawSize = view.getUint32(offset, false);
     const boxTypeInt = view.getUint32(offset + 4, false);
+    let headerSize = 8;
+    let actualSize: number;
 
-    if (boxSize < 8 && boxSize !== 0) break;
+    if (rawSize === 0) {
+      // Box extends strictly to enclosing container EOF
+      actualSize = end - offset;
+    } else if (rawSize === 1) {
+      // 64-bit largesize box: must have 16-byte header and valid safe size >= 16
+      if (offset + 16 > end) break;
+      const largeSize = view.getBigUint64(offset + 8, false);
+      if (largeSize < 16n || largeSize > BigInt(Number.MAX_SAFE_INTEGER)) break;
+      actualSize = Number(largeSize);
+      headerSize = 16;
+    } else if (rawSize < 8) {
+      // Invalid 2 <= boxSize < 8: terminate range cleanly
+      break;
+    } else {
+      actualSize = rawSize;
+    }
+
+    if (actualSize < headerSize || offset + actualSize > end) break;
 
     const isDangerous =
       boxTypeInt === FOURCC_UDTA ||
@@ -444,11 +548,17 @@ function inspectMp4Boxes(_bytes: Uint8Array, view: DataView): MarkerInfo[] {
       case 0x66747970:
         boxName = 'ftyp';
         break;
-      case 0x6d6f6f76:
+      case FOURCC_MOOV:
         boxName = 'moov';
         break;
       case 0x6d646174:
         boxName = 'mdat';
+        break;
+      case FOURCC_TRAK:
+        boxName = 'trak';
+        break;
+      case FOURCC_MDIA:
+        boxName = 'mdia';
         break;
       default:
         boxName = 'atom';
@@ -458,16 +568,21 @@ function inspectMp4Boxes(_bytes: Uint8Array, view: DataView): MarkerInfo[] {
       offset,
       marker: boxName,
       name: `Box: ${boxName}`,
-      length: boxSize,
+      length: actualSize,
       isSanitizedSafe: !isDangerous,
       description,
     });
 
-    if (boxSize === 0 || offset + boxSize > len) break;
-    offset += boxSize;
-  }
+    if (
+      (boxTypeInt === FOURCC_MOOV || boxTypeInt === FOURCC_TRAK || boxTypeInt === FOURCC_MDIA) &&
+      offset + headerSize < offset + actualSize
+    ) {
+      inspectMp4BoxRange(view, offset + headerSize, offset + actualSize, depth + 1, markers);
+    }
 
-  return markers;
+    if (rawSize === 0) break;
+    offset += actualSize;
+  }
 }
 
 

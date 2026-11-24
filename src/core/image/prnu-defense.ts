@@ -23,7 +23,8 @@ export const MAX_TILE_DIMENSION = 2048;
 export const CALIBRATED_MAX_DELTA_LUMA = 8.0;
 
 const ACTIVE_TILE_SIZE = 512;
-const TILE_HALO = 8;
+const TILE_HALO = 16;
+export const DWT_TILE_HALO = TILE_HALO;
 const MAX_FILTER_LEN = 8;
 const TRANSPOSE_BLOCK = 16;
 
@@ -837,6 +838,10 @@ export function applyWaveletPRNUAttenuation(
   const maxPatchH = Math.min(maxActiveTileH + TILE_HALO * 2, MAX_TILE_DIMENSION);
 
   const ws = createWaveletTileWorkspace(maxPatchW, maxPatchH);
+  // Multi-tile DWT must read untouched source pixels for left/top halos so earlier
+  // tiles writing back into `data` never double-filter subsequent tiles' halos.
+  const isMultiTile = width > ACTIVE_TILE_SIZE || height > ACTIVE_TILE_SIZE;
+  const readSrc: Uint8ClampedArray | Uint8Array = isMultiTile ? new Uint8Array(data) : data;
 
   try {
     let totalSquaredError = 0.0;
@@ -876,14 +881,14 @@ export function applyWaveletPRNUAttenuation(
             for (let px = 0; px < patchW; px++) {
               const pIdx = imgRowBase + (patchStartX + px) * stride;
               ws.rowBuf1D[px] =
-                0.299 * data[pIdx] +
-                0.587 * data[pIdx + 1] +
-                0.114 * data[pIdx + 2] -
+                0.299 * readSrc[pIdx] +
+                0.587 * readSrc[pIdx + 1] +
+                0.114 * readSrc[pIdx + 2] -
                 127.5;
             }
           } else {
             for (let px = 0; px < patchW; px++) {
-              ws.rowBuf1D[px] = data[imgRowBase + patchStartX + px] - 127.5;
+              ws.rowBuf1D[px] = readSrc[imgRowBase + patchStartX + px] - 127.5;
             }
           }
 
@@ -1132,11 +1137,14 @@ export function applyWaveletPRNUAttenuation(
     };
   } finally {
     zeroWaveletTileWorkspace(ws);
+    if (isMultiTile) {
+      readSrc.fill(0);
+    }
   }
 }
 
 export function applyPrnuDefense(
-  sourceImage: ImageBitmap | HTMLCanvasElement,
+  sourceImage: ImageBitmap | HTMLCanvasElement | OffscreenCanvas,
   targetCanvas: HTMLCanvasElement | OffscreenCanvas,
   level: DefenseLevel,
   hasAlpha = true,
@@ -1148,11 +1156,14 @@ export function applyPrnuDefense(
     return;
   }
 
-  if (targetCanvas.width !== width) {
-    targetCanvas.width = width;
-  }
-  if (targetCanvas.height !== height) {
-    targetCanvas.height = height;
+  const sameSurface = (sourceImage as unknown) === (targetCanvas as unknown);
+  if (!sameSurface) {
+    if (targetCanvas.width !== width) {
+      targetCanvas.width = width;
+    }
+    if (targetCanvas.height !== height) {
+      targetCanvas.height = height;
+    }
   }
 
   const ctx = targetCanvas.getContext('2d', { willReadFrequently: true, alpha: hasAlpha }) as
@@ -1165,12 +1176,16 @@ export function applyPrnuDefense(
   }
 
   if (level === 'standard') {
-    ctx.drawImage(sourceImage, 0, 0);
+    if (!sameSurface) {
+      ctx.drawImage(sourceImage, 0, 0);
+    }
     return;
   }
 
-  ctx.clearRect(0, 0, width, height);
-  ctx.drawImage(sourceImage, 0, 0, width, height);
+  if (!sameSurface) {
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(sourceImage, 0, 0, width, height);
+  }
 
   const imageData = ctx.getImageData(0, 0, width, height);
   const pixels = imageData.data;

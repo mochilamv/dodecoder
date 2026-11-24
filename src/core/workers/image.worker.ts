@@ -3,9 +3,10 @@ import { applyDeepDecontamination, sanitizeAlphaChannel } from '../image/deconta
 import { stripDisplayColorProfiles } from '../image/icc-sanitizer';
 import { applyPoissonGaussianNoise } from '../image/poisson-gaussian';
 import { createAbortError, withManagedImageBitmap } from '../image/bitmap-lifecycle';
+import { assertSafeImageDimensions } from '../image/image-header-guard';
 import type { DefenseLevel } from '../types';
 
-const TILE_SIZE = 2048;
+const MAX_IMAGE_EDGE = 1920;
 const WEBP_QUALITY = 0.6;
 
 export interface ImageWorkerJobInput {
@@ -18,7 +19,6 @@ export interface ImageWorkerJobInput {
 export interface ImageWorkerJobResult {
   buffer: ArrayBuffer;
   tilesProcessed: number;
-  wasmEncoded: boolean;
 }
 
 export async function processImageWorkerJob(
@@ -29,101 +29,71 @@ export async function processImageWorkerJob(
   const { buffer, mimeType, options, needsAlpha } = input;
   if (signal?.aborted) throw createAbortError(signal.reason);
 
+  // Fail-closed pre-decode decompression-bomb guard BEFORE createImageBitmap
+  assertSafeImageDimensions(buffer);
+
   const blob = new Blob([buffer], { type: mimeType });
 
-  const initialDims = await withManagedImageBitmap(
+  // Single-pass decode + optional 1920px proportional downscale into one canvas
+  // (no dead 2048px outer tile loop, no intermediate PNG round-trip).
+  const decoded = await withManagedImageBitmap(
     () => createImageBitmap(blob),
-    ({ bitmap }) => ({ width: bitmap.width, height: bitmap.height }),
+    ({ bitmap }) => {
+      const srcWidth = bitmap.width;
+      const srcHeight = bitmap.height;
+      if (srcWidth <= 0 || srcHeight <= 0) {
+        throw new Error('INVALID_IMAGE_DIMENSIONS');
+      }
+
+      const maxEdge = Math.max(srcWidth, srcHeight);
+      const targetWidth =
+        maxEdge > MAX_IMAGE_EDGE
+          ? Math.max(1, Math.round((srcWidth * MAX_IMAGE_EDGE) / maxEdge))
+          : srcWidth;
+      const targetHeight =
+        maxEdge > MAX_IMAGE_EDGE
+          ? Math.max(1, Math.round((srcHeight * MAX_IMAGE_EDGE) / maxEdge))
+          : srcHeight;
+
+      const canvas = new OffscreenCanvas(targetWidth, targetHeight);
+      const ctx = canvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true }) as OffscreenCanvasRenderingContext2D | null;
+      if (!ctx) throw new Error('WORKER_CONTEXT_FAILED');
+
+      if (maxEdge > MAX_IMAGE_EDGE) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+      }
+      ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+      return { width: targetWidth, height: targetHeight, canvas, ctx };
+    },
     signal
   );
 
-  let width = initialDims.width;
-  let height = initialDims.height;
-  if (width <= 0 || height <= 0) {
-    throw new Error('INVALID_IMAGE_DIMENSIONS');
-  }
-
-  const maxEdge = Math.max(width, height);
-  let workingBlob: Blob = blob;
-
-  if (maxEdge > 1920) {
-    const scale = 1920 / maxEdge;
-    width = Math.round(width * scale);
-    height = Math.round(height * scale);
-
-    const dsCanvas = new OffscreenCanvas(width, height);
-    const dsCtx = dsCanvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true }) as OffscreenCanvasRenderingContext2D | null;
-    if (!dsCtx) throw new Error('WORKER_DOWNSCALE_CONTEXT_FAILED');
-
-    await withManagedImageBitmap(
-      () => createImageBitmap(blob),
-      ({ bitmap }) => {
-        dsCtx.drawImage(bitmap, 0, 0, width, height);
-      },
-      signal
-    );
-    workingBlob = await dsCanvas.convertToBlob({ type: 'image/png' });
-  }
-
   if (signal?.aborted) throw createAbortError(signal.reason);
+  onProgress?.(35);
 
-  const cols = Math.ceil(width / TILE_SIZE);
-  const rows = Math.ceil(height / TILE_SIZE);
-  const totalTiles = cols * rows;
+  const { width, height, canvas: workCanvas, ctx: workCtx } = decoded;
+  const prnuLevel = options.defenseLevel === 'standard' ? 'hardened' : options.defenseLevel;
+  applyPrnuDefense(workCanvas, workCanvas, prnuLevel, needsAlpha, false);
+  onProgress?.(55);
 
-  const outCanvas = new OffscreenCanvas(width, height);
-  const outCtx = outCanvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true }) as OffscreenCanvasRenderingContext2D | null;
-  if (!outCtx) throw new Error('WORKER_CONTEXT_FAILED');
+  applyDeepDecontamination(workCanvas, needsAlpha);
+  onProgress?.(70);
 
-  let currentTile = 0;
-  let anyTileHasTransparency = false;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      if (signal?.aborted) throw createAbortError(signal.reason);
-
-      const sx = c * TILE_SIZE;
-      const sy = r * TILE_SIZE;
-      const sw = Math.min(TILE_SIZE, width - sx);
-      const sh = Math.min(TILE_SIZE, height - sy);
-
-      const tileCanvas = new OffscreenCanvas(sw, sh);
-      const tileCtx = tileCanvas.getContext('2d', { alpha: needsAlpha, willReadFrequently: true }) as OffscreenCanvasRenderingContext2D | null;
-      if (!tileCtx) throw new Error('WORKER_TILE_CONTEXT_FAILED');
-
-      const prnuLevel = options.defenseLevel === 'standard' ? 'hardened' : options.defenseLevel;
-
-      await withManagedImageBitmap(
-        () => createImageBitmap(workingBlob, sx, sy, sw, sh),
-        ({ bitmap }) => {
-          applyPrnuDefense(bitmap as any, tileCanvas, prnuLevel, needsAlpha, false);
-        },
-        signal
-      );
-
-      applyDeepDecontamination(tileCanvas, needsAlpha);
-
-      const imgData = tileCtx.getImageData(0, 0, sw, sh);
-      applyPoissonGaussianNoise(imgData.data);
-      const alphaReport = sanitizeAlphaChannel(imgData.data, needsAlpha);
-      if (alphaReport.hasTransparency) anyTileHasTransparency = true;
-      tileCtx.putImageData(imgData, 0, 0);
-
-      outCtx.drawImage(tileCanvas, sx, sy);
-
-      currentTile++;
-      onProgress?.(Math.round(25 + (currentTile / totalTiles) * 50));
-    }
-  }
+  const imgData = workCtx.getImageData(0, 0, width, height);
+  applyPoissonGaussianNoise(imgData.data);
+  const alphaReport = sanitizeAlphaChannel(imgData.data, needsAlpha);
+  workCtx.putImageData(imgData, 0, 0);
 
   if (signal?.aborted) throw createAbortError(signal.reason);
 
   // Drop alpha channel entirely at encode time when source was visually opaque
-  let encodeCanvas = outCanvas;
-  if (needsAlpha && !anyTileHasTransparency) {
+  let encodeCanvas = workCanvas;
+  if (needsAlpha && !alphaReport.hasTransparency) {
     const opaqueCanvas = new OffscreenCanvas(width, height);
     const opaqueCtx = opaqueCanvas.getContext('2d', { alpha: false }) as OffscreenCanvasRenderingContext2D | null;
     if (opaqueCtx) {
-      opaqueCtx.drawImage(outCanvas, 0, 0);
+      opaqueCtx.drawImage(workCanvas, 0, 0);
       encodeCanvas = opaqueCanvas;
     }
   }
@@ -133,13 +103,18 @@ export async function processImageWorkerJob(
   if (encodedBlob.type !== 'image/webp') throw new Error('WEBP_ENCODE_UNSUPPORTED');
   const rawEncoded = new Uint8Array(await encodedBlob.arrayBuffer());
   onProgress?.(90);
-  const cleanBytes = stripDisplayColorProfiles(rawEncoded, 'image/webp');
 
-  const resultBytes = new Uint8Array(cleanBytes.byteLength);
-  resultBytes.set(cleanBytes);
-  const resultBuffer: ArrayBuffer = resultBytes.buffer;
-
-  return { buffer: resultBuffer, tilesProcessed: totalTiles, wasmEncoded: false };
+  let cleanBytes: Uint8Array | null = null;
+  try {
+    cleanBytes = stripDisplayColorProfiles(rawEncoded, 'image/webp');
+    const resultBytes = new Uint8Array(cleanBytes.byteLength);
+    resultBytes.set(cleanBytes);
+    const resultBuffer: ArrayBuffer = resultBytes.buffer;
+    return { buffer: resultBuffer, tilesProcessed: 1 };
+  } finally {
+    rawEncoded.fill(0);
+    if (cleanBytes) cleanBytes.fill(0);
+  }
 }
 
 if (typeof self !== 'undefined') {
